@@ -25,12 +25,19 @@ export class NetworkManager {
   public connect() {
     if (this.socket) return;
 
-    // Connect to current origin
-    this.socket = io({
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
+    // Connect to external backend server if configured, otherwise current origin
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || undefined;
+    this.socket = socketUrl
+      ? io(socketUrl, {
+          transports: ['websocket', 'polling'],
+          reconnectionAttempts: 10,
+          reconnectionDelay: 1000,
+        })
+      : io({
+          transports: ['websocket', 'polling'],
+          reconnectionAttempts: 10,
+          reconnectionDelay: 1000,
+        });
 
     this.socket.on('connect', () => {
       this.isConnected = true;
