@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Camera, Volume2, VolumeX, Users, HelpCircle, ChevronDown, ChevronUp, Eye } from 'lucide-react';
+import { Camera, Volume2, VolumeX, Users, HelpCircle, ChevronDown, ChevronUp, Server } from 'lucide-react';
 import { CameraPreset } from '../types/game.ts';
 
 interface BottomDockProps {
@@ -10,6 +10,7 @@ interface BottomDockProps {
   playerCount: number;
   onOpenPlayersList: () => void;
   onOpenControlsHelp: () => void;
+  onOpenServerConfig?: () => void;
 }
 
 export const BottomDock: React.FC<BottomDockProps> = ({
@@ -20,6 +21,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   playerCount,
   onOpenPlayersList,
   onOpenControlsHelp,
+  onOpenServerConfig,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -109,6 +111,17 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               {playerCount}
             </span>
           </button>
+
+          {/* Server Config */}
+          {onOpenServerConfig && (
+            <button
+              onClick={onOpenServerConfig}
+              className="p-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 rounded-xl text-slate-300 hover:text-white transition-colors"
+              title="게임 서버 설정"
+            >
+              <Server className="w-4 h-4 text-blue-400" />
+            </button>
+          )}
 
           {/* Controls Help */}
           <button

@@ -19,13 +19,15 @@ import { BottomDock } from './components/BottomDock.tsx';
 import { OnlinePlayersModal } from './components/OnlinePlayersModal.tsx';
 import { ControlsHelpModal } from './components/ControlsHelpModal.tsx';
 import { BillboardLabels } from './components/BillboardLabels.tsx';
-import { Compass, Users, Sparkles } from 'lucide-react';
+import { ServerConfigModal } from './components/ServerConfigModal.tsx';
+import { Compass, Server } from 'lucide-react';
 
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // User State
   const [hasEntered, setHasEntered] = useState(false);
+  const hasEnteredRef = useRef(false);
   const [selfNickname, setSelfNickname] = useState('탐험가');
   const [selfColor, setSelfColor] = useState('#3b82f6');
   const [selfId, setSelfId] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [isPlayersModalOpen, setIsPlayersModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [isServerModalOpen, setIsServerModalOpen] = useState(false);
 
   // Game data state for 2D overlays
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -45,8 +48,8 @@ export default function App() {
   const [selfSpeechBubble, setSelfSpeechBubble] = useState<string | null>(null);
   const [activeRemotePlayers, setActiveRemotePlayers] = useState<RemotePlayerInstance[]>([]);
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({
-    width: window.innerWidth,
-    height: window.innerHeight,
+    width: typeof window !== 'undefined' ? window.innerWidth : 1280,
+    height: typeof window !== 'undefined' ? window.innerHeight : 720,
   });
 
   // Three.js References
@@ -88,13 +91,13 @@ export default function App() {
 
   // Handle entering the world
   const handleJoinWorld = (nickname: string, color: string) => {
+    hasEnteredRef.current = true;
     setSelfNickname(nickname);
     setSelfColor(color);
     setHasEntered(true);
 
     // Initialize local character rig with chosen color
     if (localRigRef.current) {
-      // Re-create rig with new color
       const scene = localRigRef.current.root.parent as THREE.Scene | null;
       if (scene) {
         scene.remove(localRigRef.current.root);
@@ -132,7 +135,7 @@ export default function App() {
     soundEngine.setMuted(nextMuted);
   };
 
-  // Initialize Three.js Scene and Game Loop
+  // Initialize Three.js Scene and Game Loop ONCE
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -280,7 +283,7 @@ export default function App() {
       }
 
       // If typing in chat or modal is open, ignore game keys
-      if (isChatFocused || isPlayersModalOpen || isHelpModalOpen) return;
+      if (isChatFocused || isPlayersModalOpen || isHelpModalOpen || isServerModalOpen) return;
 
       switch (e.code) {
         case 'KeyW':
@@ -337,7 +340,6 @@ export default function App() {
     };
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Allow drag rotation anywhere on canvas
       isMouseDownRef.current = true;
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
     };
@@ -383,13 +385,14 @@ export default function App() {
     let animationFrameId = 0;
     const clock = new THREE.Clock();
     let syncTickAccumulator = 0;
+    let billboardSyncAccumulator = 0;
 
     const tick = () => {
       const delta = Math.min(0.1, clock.getDelta());
       const elapsedTime = clock.getElapsedTime();
 
       // A. Local Player Movement & Physics
-      if (hasEntered && !isChatFocused) {
+      if (hasEnteredRef.current && !isChatFocused) {
         const { w, s, a, d } = keysRef.current;
         let moveX = 0;
         let moveZ = 0;
@@ -499,6 +502,15 @@ export default function App() {
       // B. Update Remote Players
       remoteMgr.update(delta);
 
+      // Keep active remote players synced for 2D billboard labels
+      billboardSyncAccumulator += delta;
+      if (billboardSyncAccumulator >= 0.08) {
+        billboardSyncAccumulator = 0;
+        if (remoteMgr.players.size > 0 || activeRemotePlayers.length > 0) {
+          setActiveRemotePlayers(Array.from(remoteMgr.players.values()));
+        }
+      }
+
       // C. Update World (Flames, Water)
       worldEnv.update(delta, elapsedTime);
 
@@ -531,7 +543,7 @@ export default function App() {
         container.removeChild(renderer.domElement);
       }
     };
-  }, [hasEntered]);
+  }, []); // Mounted once, never torn down on join
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none">
@@ -575,16 +587,22 @@ export default function App() {
 
         {/* Zone 3: Primary Action & Player status */}
         <div className="flex items-center gap-2 pointer-events-auto">
-          <div className="px-2.5 py-1 bg-slate-900/80 border border-slate-700/70 rounded-xl shadow-lg text-[11px] font-mono flex items-center gap-1.5">
+          {/* Connection status button */}
+          <button
+            onClick={() => setIsServerModalOpen(true)}
+            className="px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/70 rounded-xl shadow-lg text-[11px] font-mono flex items-center gap-1.5 transition-colors"
+            title="게임 서버 설정 및 연결 확인"
+          >
             <span
               className={`w-2 h-2 rounded-full ${
                 isConnected ? 'bg-emerald-400' : 'bg-amber-400'
               }`}
             />
             <span className={isConnected ? 'text-emerald-300' : 'text-amber-300'}>
-              {isConnected ? '온라인' : '연결 중...'}
+              {isConnected ? '온라인' : '연결 대기중'}
             </span>
-          </div>
+            <Server className="w-3 h-3 text-slate-400 ml-0.5" />
+          </button>
 
           {hasEntered && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 border border-slate-700/70 rounded-xl shadow-lg text-xs font-semibold text-slate-200">
@@ -599,7 +617,13 @@ export default function App() {
       </header>
 
       {/* Initial Entry Modal */}
-      {!hasEntered && <WorldEntryModal onJoin={handleJoinWorld} />}
+      {!hasEntered && (
+        <WorldEntryModal
+          onJoin={handleJoinWorld}
+          isConnected={isConnected}
+          onOpenServerConfig={() => setIsServerModalOpen(true)}
+        />
+      )}
 
       {/* Real-Time Chat Overlay */}
       {hasEntered && (
@@ -622,6 +646,7 @@ export default function App() {
           playerCount={playerList.length}
           onOpenPlayersList={() => setIsPlayersModalOpen(true)}
           onOpenControlsHelp={() => setIsHelpModalOpen(true)}
+          onOpenServerConfig={() => setIsServerModalOpen(true)}
         />
       )}
 
@@ -638,6 +663,13 @@ export default function App() {
       <ControlsHelpModal
         isOpen={isHelpModalOpen}
         onClose={() => setIsHelpModalOpen(false)}
+      />
+
+      {/* Server Config Modal */}
+      <ServerConfigModal
+        isOpen={isServerModalOpen}
+        onClose={() => setIsServerModalOpen(false)}
+        isConnected={isConnected}
       />
     </div>
   );

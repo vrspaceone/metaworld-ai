@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Compass, Users, Sparkles, Move3d } from 'lucide-react';
+import { Compass, Users, Sparkles, Move3d, Server, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface WorldEntryModalProps {
   onJoin: (nickname: string, color: string) => void;
+  isConnected: boolean;
+  onOpenServerConfig: () => void;
 }
 
 const AVATAR_COLORS = [
@@ -14,7 +16,11 @@ const AVATAR_COLORS = [
   { name: '나이트 슬레이트', hex: '#475569' },
 ];
 
-export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({ onJoin }) => {
+export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
+  onJoin,
+  isConnected,
+  onOpenServerConfig,
+}) => {
   const [nickname, setNickname] = useState(() => `탐험가_${Math.floor(Math.random() * 899 + 100)}`);
   const [selectedColor, setSelectedColor] = useState(AVATAR_COLORS[0].hex);
 
@@ -34,24 +40,67 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({ onJoin }) => {
         />
 
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center shadow-lg transition-colors duration-300"
-            style={{ backgroundColor: selectedColor }}
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-12 h-12 rounded-xl flex items-center justify-center shadow-lg transition-colors duration-300"
+              style={{ backgroundColor: selectedColor }}
+            >
+              <Compass className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white">
+                Meta World (메타월드)
+              </h1>
+              <p className="text-xs md:text-sm text-slate-400">
+                웹 브라우저 3D 자연 멀티플레이 프로토타입
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenServerConfig}
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-colors flex items-center gap-1.5 text-xs font-medium"
+            title="소켓 서버 설정"
           >
-            <Compass className="w-7 h-7 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white">
-              Meta World (메타월드)
-            </h1>
-            <p className="text-xs md:text-sm text-slate-400">
-              웹 브라우저 3D 자연 멀티플레이 프로토타입
-            </p>
-          </div>
+            <Server className="w-4 h-4 text-blue-400" />
+            <span className="hidden sm:inline">서버 설정</span>
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Connection Notice */}
+        <div
+          className={`mb-4 px-3.5 py-2.5 rounded-xl border flex items-center justify-between text-xs ${
+            isConnected
+              ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300'
+              : 'bg-amber-950/30 border-amber-800/40 text-amber-300'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {isConnected ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            )}
+            <span>
+              {isConnected
+                ? '실시간 멀티플레이 서버 연결 완료'
+                : '소켓 서버 연결 대기 중... (Render 서버 깨어나는 중이거나 URL 설정 필요)'}
+            </span>
+          </div>
+          {!isConnected && (
+            <button
+              type="button"
+              onClick={onOpenServerConfig}
+              className="underline hover:text-white text-[11px] shrink-0 font-semibold ml-2"
+            >
+              URL 입력
+            </button>
+          )}
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
           {/* Nickname Input */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
@@ -97,7 +146,7 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({ onJoin }) => {
           </div>
 
           {/* Controls Quick Guide */}
-          <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/60 text-xs text-slate-300 space-y-2">
+          <div className="p-3.5 bg-slate-800/60 rounded-xl border border-slate-700/60 text-xs text-slate-300 space-y-2">
             <div className="flex items-center gap-2 font-medium text-slate-200">
               <Move3d className="w-4 h-4 text-emerald-400" />
               <span>3D 조작 안내</span>
