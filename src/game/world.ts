@@ -17,8 +17,8 @@ export interface WorldEnvironment {
 export function getTerrainHeight(x: number, z: number): number {
   const distFromCenter = Math.hypot(x, z);
 
-  // Central campfire plaza (within 9 units) is flat and safe
-  if (distFromCenter < 8) {
+  // Central campfire plaza (within 12 units) is flat, spacious, and safe
+  if (distFromCenter < 12) {
     return 0;
   }
 
@@ -40,8 +40,8 @@ export function getTerrainHeight(x: number, z: number): number {
   }
 
   // Blend transition from flat plaza to hills
-  if (distFromCenter < 14) {
-    const t = (distFromCenter - 8) / 6;
+  if (distFromCenter < 18) {
+    const t = (distFromCenter - 12) / 6;
     return h * t;
   }
 
@@ -292,16 +292,19 @@ export function buildNatureWorld(scene: THREE.Scene): WorldEnvironment {
 function buildFoliage(scene: THREE.Scene) {
   const treePositions: { x: number; z: number; type: 'pine' | 'leaf' | 'rock' }[] = [];
 
-  // Seeded distribution avoiding center campfire and lake
+  // Seeded distribution keeping a wide open 15m radius clearing for the campfire plaza
   for (let i = 0; i < 90; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const radius = 9 + Math.random() * 42;
+    const radius = 15.5 + Math.random() * 35;
     const x = Math.cos(angle) * radius;
     const z = Math.sin(angle) * radius;
 
+    // Strict clearance around central spawn plaza
+    if (Math.hypot(x, z) < 15.0) continue;
+
     // Avoid lake
     const lakeDist = Math.hypot(x - 18, z + 12);
-    if (lakeDist < 11) continue;
+    if (lakeDist < 11.5) continue;
 
     const rand = Math.random();
     const type = rand < 0.55 ? 'pine' : rand < 0.85 ? 'leaf' : 'rock';

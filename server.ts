@@ -71,9 +71,9 @@ async function startServer() {
       const nickname = (data?.nickname || 'Traveler').slice(0, 16);
       const color = data?.color || '#3b82f6';
 
-      // Spawn in a ring around the campfire (radius ~6-10 units)
+      // Spawn in a spacious open ring around the campfire (radius ~4.8 - 6.8 units)
       const angle = Math.random() * Math.PI * 2;
-      const dist = 6 + Math.random() * 4;
+      const dist = 4.8 + Math.random() * 2.0;
       const initialPos = {
         x: Math.sin(angle) * dist,
         y: 0,
