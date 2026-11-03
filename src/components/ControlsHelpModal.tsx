@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Keyboard, Mouse, MessageSquare, Compass } from 'lucide-react';
+import { X, Keyboard, Mouse, Smartphone, MessageSquare, Compass } from 'lucide-react';
 
 interface ControlsHelpModalProps {
   isOpen: boolean;
@@ -10,12 +10,12 @@ export const ControlsHelpModal: React.FC<ControlsHelpModalProps> = ({ isOpen, on
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-5 md:p-6 text-white max-h-[85vh] overflow-y-auto custom-scrollbar">
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
           <div className="flex items-center gap-2">
-            <Keyboard className="w-5 h-5 text-blue-400" />
-            <h2 className="text-lg font-bold text-white">3D 메타월드 조작 방법</h2>
+            <Compass className="w-5 h-5 text-blue-400" />
+            <h2 className="text-base md:text-lg font-bold text-white">메타월드 조작 방법</h2>
           </div>
           <button
             onClick={onClose}
@@ -25,34 +25,52 @@ export const ControlsHelpModal: React.FC<ControlsHelpModalProps> = ({ isOpen, on
           </button>
         </div>
 
-        <div className="space-y-4 text-xs">
+        <div className="space-y-3.5 text-xs">
+          {/* Mobile Touch Guide */}
+          <div className="p-3 bg-blue-950/40 border border-blue-800/50 rounded-xl space-y-1.5">
+            <div className="flex items-center gap-2 font-semibold text-blue-300">
+              <Smartphone className="w-4 h-4 text-blue-400" />
+              <span>📱 스마트폰 / 태블릿 터치 조작</span>
+            </div>
+            <div className="text-slate-300 space-y-1 pl-6">
+              <div>• <strong>좌측 가상 조이스틱</strong>: 360° 방향 캐릭터 걷기/달리기</div>
+              <div>• <strong>우측 JUMP 버튼</strong>: 점프</div>
+              <div>• <strong>화면 빈 곳 1손가락 드래그</strong>: 카메라 시점 회전</div>
+              <div>• <strong>화면 2손가락 핀치</strong>: 줌인 / 줌아웃</div>
+              <div>• <strong>우측 상단 [채팅] 버튼</strong>: 실시간 채팅창 열기</div>
+            </div>
+          </div>
+
+          {/* PC Keyboard Guide */}
           <div className="flex items-start gap-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700/50">
             <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg shrink-0">
-              <Compass className="w-4 h-4" />
+              <Keyboard className="w-4 h-4" />
             </div>
             <div>
-              <div className="font-semibold text-slate-200 mb-0.5">캐릭터 3인칭 이동</div>
+              <div className="font-semibold text-slate-200 mb-1">💻 PC 키보드 이동</div>
               <div className="text-slate-400 space-y-1">
-                <div><code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">W / S</code> : 앞/뒤 이동</div>
-                <div><code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">A / D</code> : 좌/우 이동</div>
+                <div><code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">W / S</code> : 앞 / 뒤 이동</div>
+                <div><code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">A / D</code> : 좌 / 우 이동</div>
                 <div><code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">Space</code> : 점프</div>
               </div>
             </div>
           </div>
 
+          {/* Mouse Guide */}
           <div className="flex items-start gap-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700/50">
             <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg shrink-0">
               <Mouse className="w-4 h-4" />
             </div>
             <div>
-              <div className="font-semibold text-slate-200 mb-0.5">3D 카메라 시점 제어</div>
+              <div className="font-semibold text-slate-200 mb-1">🖱️ PC 마우스 시점</div>
               <div className="text-slate-400 space-y-1">
-                <div>화면 아무 곳이나 <strong>마우스 드래그</strong> (또는 우클릭 드래그)로 360° 자유 회전</div>
-                <div><strong>마우스 휠 스크롤</strong>로 줌인 / 줌아웃</div>
+                <div>• 마우스 드래그로 360° 시점 회전</div>
+                <div>• 마우스 휠 스크롤로 줌인 / 줌아웃</div>
               </div>
             </div>
           </div>
 
+          {/* Chat Guide */}
           <div className="flex items-start gap-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700/50">
             <div className="p-2 bg-purple-500/20 text-purple-400 rounded-lg shrink-0">
               <MessageSquare className="w-4 h-4" />
@@ -60,7 +78,7 @@ export const ControlsHelpModal: React.FC<ControlsHelpModalProps> = ({ isOpen, on
             <div>
               <div className="font-semibold text-slate-200 mb-0.5">실시간 멀티플레이 대화</div>
               <div className="text-slate-400">
-                <code className="bg-slate-700 text-purple-300 px-1 py-0.5 rounded font-mono">Enter</code> 키를 누르면 채팅 입력창이 활성화되며, 메시지를 전송하면 머리 위 3D 말풍선과 전체 채팅창에 실시간으로 전달됩니다.
+                <code className="bg-slate-700 text-purple-300 px-1 py-0.5 rounded font-mono">Enter</code> 키 또는 모바일 [채팅] 버튼을 누르면 메시지를 보낼 수 있으며, 캐릭터 머리 위 3D 말풍선과 전체 채팅창에 실시간으로 전달됩니다.
               </div>
             </div>
           </div>

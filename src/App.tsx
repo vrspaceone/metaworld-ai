@@ -20,6 +20,7 @@ import { OnlinePlayersModal } from './components/OnlinePlayersModal.tsx';
 import { ControlsHelpModal } from './components/ControlsHelpModal.tsx';
 import { BillboardLabels } from './components/BillboardLabels.tsx';
 import { ServerConfigModal } from './components/ServerConfigModal.tsx';
+import { VirtualJoystick, TouchJumpButton } from './components/VirtualJoystick.tsx';
 import { Compass, Server } from 'lucide-react';
 
 export default function App() {
@@ -32,6 +33,14 @@ export default function App() {
   const [selfColor, setSelfColor] = useState('#3b82f6');
   const [selfId, setSelfId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+
+  // Mobile / Touch detection
+  const [isTouchDevice, setIsTouchDevice] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
+  });
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const touchMoveRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
 
   // UI Modals & State
   const [isChatFocused, setIsChatFocused] = useState(false);
@@ -67,7 +76,7 @@ export default function App() {
   const isMovingRef = useRef<boolean>(false);
   const isJumpingRef = useRef<boolean>(false);
 
-  // Input Keys State
+  // Input Keys State (Keyboard)
   const keysRef = useRef<{
     w: boolean;
     s: boolean;
@@ -134,6 +143,16 @@ export default function App() {
     setIsMuted(nextMuted);
     soundEngine.setMuted(nextMuted);
   };
+
+  // Handle jump trigger for touch and key
+  const triggerJump = useCallback(() => {
+    if (isGroundedRef.current) {
+      playerVelocityRef.current.y = 8.8; // Jump impulse
+      isGroundedRef.current = false;
+      isJumpingRef.current = true;
+      soundEngine.playJump();
+    }
+  }, []);
 
   // Initialize Three.js Scene and Game Loop ONCE
   useEffect(() => {
@@ -274,15 +293,13 @@ export default function App() {
       }
     });
 
-    // 8. Event Listeners for Movement & Camera
+    // 8. Event Listeners for Movement & Camera (Keyboard)
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
-        // Toggle chat focus
         setIsChatFocused((prev) => !prev);
         return;
       }
 
-      // If typing in chat or modal is open, ignore game keys
       if (isChatFocused || isPlayersModalOpen || isHelpModalOpen || isServerModalOpen) return;
 
       switch (e.code) {
@@ -303,12 +320,9 @@ export default function App() {
           keysRef.current.d = true;
           break;
         case 'Space':
-          if (!keysRef.current.space && isGroundedRef.current) {
+          if (!keysRef.current.space) {
             keysRef.current.space = true;
-            playerVelocityRef.current.y = 8.8; // Jump impulse
-            isGroundedRef.current = false;
-            isJumpingRef.current = true;
-            soundEngine.playJump();
+            triggerJump();
           }
           e.preventDefault();
           break;
@@ -339,6 +353,7 @@ export default function App() {
       }
     };
 
+    // Mouse Listeners
     const handleMouseDown = (e: MouseEvent) => {
       isMouseDownRef.current = true;
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
@@ -361,12 +376,59 @@ export default function App() {
       tpCamera.zoom(e.deltaY);
     };
 
+    // Touch Listeners on Canvas (1-finger camera orbit, 2-finger pinch zoom)
+    let lastTouchPos: { x: number; y: number } | null = null;
+    let lastPinchDist: number | null = null;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.target !== renderer.domElement) return;
+
+      if (e.touches.length === 1) {
+        lastTouchPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        lastPinchDist = null;
+      } else if (e.touches.length === 2) {
+        lastTouchPos = null;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        lastPinchDist = Math.hypot(dx, dy);
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.target !== renderer.domElement) return;
+
+      if (e.touches.length === 1 && lastTouchPos) {
+        const dx = e.touches[0].clientX - lastTouchPos.x;
+        const dy = e.touches[0].clientY - lastTouchPos.y;
+        lastTouchPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        tpCamera.rotate(dx * 1.25, dy * 1.25);
+      } else if (e.touches.length === 2 && lastPinchDist !== null) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const currentDist = Math.hypot(dx, dy);
+        const deltaDist = currentDist - lastPinchDist;
+        lastPinchDist = currentDist;
+        tpCamera.zoom(-deltaDist * 14);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      lastTouchPos = null;
+      lastPinchDist = null;
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('wheel', handleWheel, { passive: true });
+
+    const domCanvas = renderer.domElement;
+    domCanvas.addEventListener('touchstart', handleTouchStart, { passive: true });
+    domCanvas.addEventListener('touchmove', handleTouchMove, { passive: true });
+    domCanvas.addEventListener('touchend', handleTouchEnd, { passive: true });
+    domCanvas.addEventListener('touchcancel', handleTouchEnd, { passive: true });
 
     // Resize handler
     const handleResize = () => {
@@ -377,6 +439,7 @@ export default function App() {
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
       setViewportSize({ width, height });
+      setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024);
     };
 
     window.addEventListener('resize', handleResize);
@@ -394,22 +457,27 @@ export default function App() {
       // A. Local Player Movement & Physics
       if (hasEnteredRef.current && !isChatFocused) {
         const { w, s, a, d } = keysRef.current;
-        let moveX = 0;
-        let moveZ = 0;
+        const tMove = touchMoveRef.current;
+
+        // Combine Keyboard + Virtual Touch Joystick
+        let moveX = tMove.x;
+        let moveZ = tMove.z;
 
         if (w) moveZ -= 1;
         if (s) moveZ += 1;
         if (a) moveX -= 1;
         if (d) moveX += 1;
 
-        const isMoving = moveX !== 0 || moveZ !== 0;
+        const isMoving = Math.abs(moveX) > 0.05 || Math.abs(moveZ) > 0.05;
         isMovingRef.current = isMoving;
 
         if (isMoving) {
-          // Normalize input
+          // Clamp/normalize input magnitude
           const len = Math.hypot(moveX, moveZ);
-          moveX /= len;
-          moveZ /= len;
+          if (len > 1) {
+            moveX /= len;
+            moveZ /= len;
+          }
 
           // Camera azimuth relative direction
           const camAngle = tpCamera.theta;
@@ -536,6 +604,11 @@ export default function App() {
       window.removeEventListener('wheel', handleWheel);
       window.removeEventListener('resize', handleResize);
 
+      domCanvas.removeEventListener('touchstart', handleTouchStart);
+      domCanvas.removeEventListener('touchmove', handleTouchMove);
+      domCanvas.removeEventListener('touchend', handleTouchEnd);
+      domCanvas.removeEventListener('touchcancel', handleTouchEnd);
+
       networkManager.disconnect();
       remoteMgr.clear();
       renderer.dispose();
@@ -543,12 +616,15 @@ export default function App() {
         container.removeChild(renderer.domElement);
       }
     };
-  }, []); // Mounted once, never torn down on join
+  }, [triggerJump]); // Mounted once, never torn down on join
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none">
+    <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none touch-none">
       {/* 3D WebGL Canvas Mount Container */}
-      <div ref={containerRef} className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing" />
+      <div
+        ref={containerRef}
+        className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing canvas-container"
+      />
 
       {/* Floating 3D -> 2D Billboard Labels (Nicknames & Speech Bubbles) */}
       {hasEntered && (
@@ -563,21 +639,21 @@ export default function App() {
         />
       )}
 
-      {/* Top Bar Header per Design Guidelines (Zone 1: Brand, Zone 2: Single-line context, Zone 3: Status) */}
-      <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between gap-8 px-6 py-4 pointer-events-none">
-        {/* Zone 1: Single text element wordmark */}
-        <div className="flex items-center gap-2.5 pointer-events-auto bg-slate-900/80 border border-slate-700/70 rounded-xl px-3.5 py-1.5 shadow-lg">
+      {/* Top Bar Header (Zone 1: Brand, Zone 2: Single-line context, Zone 3: Status) */}
+      <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between gap-4 sm:gap-8 px-4 sm:px-6 py-3 sm:py-4 pointer-events-none">
+        {/* Zone 1: Wordmark */}
+        <div className="flex items-center gap-2 pointer-events-auto bg-slate-900/80 border border-slate-700/70 rounded-xl px-3 py-1.5 shadow-lg">
           <div className="w-5 h-5 rounded-lg bg-blue-600 flex items-center justify-center">
             <Compass className="w-3.5 h-3.5 text-white" />
           </div>
           <span className="text-sm font-bold tracking-tight text-white whitespace-nowrap">
             Meta World
           </span>
-          <span className="text-xs text-slate-400 font-medium">자연 프로토타입</span>
+          <span className="hidden sm:inline text-xs text-slate-400 font-medium">자연 프로토타입</span>
         </div>
 
-        {/* Zone 2: Unboxed metadata */}
-        <div className="hidden md:flex items-center gap-3 text-xs text-slate-300 font-medium bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-1.5 backdrop-blur-xs">
+        {/* Zone 2: Unboxed metadata (Hidden on mobile) */}
+        <div className="hidden lg:flex items-center gap-3 text-xs text-slate-300 font-medium bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-1.5 backdrop-blur-xs">
           <span>Nature 01</span>
           <span aria-hidden="true" className="text-slate-500">·</span>
           <span>중앙 모닥불 광장</span>
@@ -605,16 +681,35 @@ export default function App() {
           </button>
 
           {hasEntered && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 border border-slate-700/70 rounded-xl shadow-lg text-xs font-semibold text-slate-200">
+            <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 bg-slate-900/80 border border-slate-700/70 rounded-xl shadow-lg text-xs font-semibold text-slate-200">
               <div
-                className="w-3 h-3 rounded-full shadow-xs"
+                className="w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full shadow-xs"
                 style={{ backgroundColor: selfColor }}
               />
-              <span className="truncate max-w-[100px]">{selfNickname}</span>
+              <span className="truncate max-w-[70px] sm:max-w-[100px]">{selfNickname}</span>
             </div>
           )}
         </div>
       </header>
+
+      {/* Mobile On-Screen Virtual Touch Controls */}
+      {hasEntered && isTouchDevice && (
+        <>
+          {/* Left: Virtual Joystick */}
+          <div className="fixed bottom-6 left-6 z-30 pointer-events-auto">
+            <VirtualJoystick
+              onMove={(move) => {
+                touchMoveRef.current = move;
+              }}
+            />
+          </div>
+
+          {/* Right: Touch Jump Button */}
+          <div className="fixed bottom-8 right-6 z-30 pointer-events-auto">
+            <TouchJumpButton onJump={triggerJump} />
+          </div>
+        </>
+      )}
 
       {/* Initial Entry Modal */}
       {!hasEntered && (
@@ -625,7 +720,7 @@ export default function App() {
         />
       )}
 
-      {/* Real-Time Chat Overlay */}
+      {/* Real-Time Chat Overlay (Responsive Desktop Card + Mobile Slide Drawer) */}
       {hasEntered && (
         <ChatOverlay
           messages={chatMessages}
@@ -633,6 +728,8 @@ export default function App() {
           selfNickname={selfNickname}
           isChatFocused={isChatFocused}
           setIsChatFocused={setIsChatFocused}
+          isMobileDrawerOpen={isMobileDrawerOpen}
+          setIsMobileDrawerOpen={setIsMobileDrawerOpen}
         />
       )}
 

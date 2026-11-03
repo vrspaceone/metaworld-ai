@@ -23,7 +23,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
   onOpenControlsHelp,
   onOpenServerConfig,
 }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
 
   const presets: { id: CameraPreset; label: string }[] = [
     { id: 'close', label: '근접' },
