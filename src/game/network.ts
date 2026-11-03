@@ -49,6 +49,11 @@ export class NetworkManager {
       this.notifyConnection(false);
     });
 
+    this.socket.on('connect_error', () => {
+      this.isConnected = false;
+      this.notifyConnection(false);
+    });
+
     this.socket.on('init:world', (data: { selfId: string; players: PlayerData[]; chatHistory: ChatMessage[] }) => {
       this.selfId = data.selfId;
       this.onWorldInitCallbacks.forEach(cb => cb(data));

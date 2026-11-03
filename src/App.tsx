@@ -29,6 +29,7 @@ export default function App() {
   const [selfNickname, setSelfNickname] = useState('탐험가');
   const [selfColor, setSelfColor] = useState('#3b82f6');
   const [selfId, setSelfId] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   // UI Modals & State
   const [isChatFocused, setIsChatFocused] = useState(false);
@@ -218,6 +219,8 @@ export default function App() {
 
     // 7. Network Event Subscriptions
     networkManager.connect();
+    networkManager.onConnectionChange((connected) => setIsConnected(connected));
+    setIsConnected(networkManager.isConnected);
 
     networkManager.onWorldInit((data) => {
       setSelfId(data.selfId);
@@ -572,6 +575,17 @@ export default function App() {
 
         {/* Zone 3: Primary Action & Player status */}
         <div className="flex items-center gap-2 pointer-events-auto">
+          <div className="px-2.5 py-1 bg-slate-900/80 border border-slate-700/70 rounded-xl shadow-lg text-[11px] font-mono flex items-center gap-1.5">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isConnected ? 'bg-emerald-400' : 'bg-amber-400'
+              }`}
+            />
+            <span className={isConnected ? 'text-emerald-300' : 'text-amber-300'}>
+              {isConnected ? '온라인' : '연결 중...'}
+            </span>
+          </div>
+
           {hasEntered && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 border border-slate-700/70 rounded-xl shadow-lg text-xs font-semibold text-slate-200">
               <div

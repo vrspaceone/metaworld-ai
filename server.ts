@@ -2,6 +2,7 @@ import express from 'express';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,10 +31,22 @@ async function startServer() {
   const app = express();
   const server = http.createServer(app);
 
+  // Enable CORS for all incoming requests (Vercel frontend domain, local, etc.)
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   const io = new SocketIOServer(server, {
     cors: {
       origin: '*',
       methods: ['GET', 'POST'],
+      credentials: true,
     },
     transports: ['websocket', 'polling'],
   });
@@ -175,16 +188,23 @@ async function startServer() {
     });
   });
 
-  // REST API status endpoint
+  // Health check endpoints for Render, Railway, and monitoring
+  app.get('/health', (_req, res) => {
+    res.status(200).send('OK');
+  });
+
   app.get('/api/status', (_req, res) => {
     res.json({
       status: 'ok',
+      service: 'Meta World Game Server',
       activePlayers: players.size,
       time: new Date().toISOString(),
     });
   });
 
   const isProduction = process.env.NODE_ENV === 'production';
+  const distPath = path.resolve(__dirname, 'dist');
+  const hasDist = fs.existsSync(distPath) && fs.existsSync(path.resolve(distPath, 'index.html'));
 
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
@@ -193,10 +213,20 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+  } else if (hasDist) {
+    app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      res.sendFile(path.resolve(distPath, 'index.html'));
+    });
+  } else {
+    // Standalone backend mode on Render/Railway
+    app.get('/', (_req, res) => {
+      res.json({
+        service: 'Meta World Realtime Game Server',
+        status: 'running',
+        activePlayers: players.size,
+        message: 'Socket.IO endpoint ready. Connect via WebSocket or polling.',
+      });
     });
   }
 
