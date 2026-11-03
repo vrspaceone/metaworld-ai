@@ -1,0 +1,130 @@
+import * as THREE from 'three';
+import { PlayerData, Vector3D } from '../types/game.ts';
+import { CharacterRig, animateCharacterRig, createCharacter } from './character.ts';
+
+export interface RemotePlayerInstance {
+  data: PlayerData;
+  rig: CharacterRig;
+  currentPos: THREE.Vector3;
+  targetPos: THREE.Vector3;
+  currentRotY: number;
+  targetRotY: number;
+  isMoving: boolean;
+  isJumping: boolean;
+  activeSpeechBubble: string | null;
+  speechBubbleTimer: number;
+}
+
+export class RemotePlayersManager {
+  private scene: THREE.Scene;
+  public players = new Map<string, RemotePlayerInstance>();
+
+  constructor(scene: THREE.Scene) {
+    this.scene = scene;
+  }
+
+  public addPlayer(player: PlayerData) {
+    if (this.players.has(player.id)) {
+      this.removePlayer(player.id);
+    }
+
+    const rig = createCharacter(player.color);
+    rig.root.position.set(player.position.x, player.position.y, player.position.z);
+    rig.root.rotation.y = player.rotationY;
+
+    this.scene.add(rig.root);
+
+    const instance: RemotePlayerInstance = {
+      data: player,
+      rig,
+      currentPos: new THREE.Vector3(player.position.x, player.position.y, player.position.z),
+      targetPos: new THREE.Vector3(player.position.x, player.position.y, player.position.z),
+      currentRotY: player.rotationY,
+      targetRotY: player.rotationY,
+      isMoving: player.isMoving,
+      isJumping: player.isJumping,
+      activeSpeechBubble: null,
+      speechBubbleTimer: 0,
+    };
+
+    this.players.set(player.id, instance);
+  }
+
+  public updatePlayerTransform(
+    id: string,
+    pos: Vector3D,
+    rotY: number,
+    isMoving: boolean,
+    isJumping: boolean
+  ) {
+    const instance = this.players.get(id);
+    if (!instance) return;
+
+    instance.targetPos.set(pos.x, pos.y, pos.z);
+    instance.targetRotY = rotY;
+    instance.isMoving = isMoving;
+    instance.isJumping = isJumping;
+  }
+
+  public setSpeechBubble(id: string, text: string) {
+    const instance = this.players.get(id);
+    if (!instance) return;
+    instance.activeSpeechBubble = text;
+    instance.speechBubbleTimer = 5.0; // Show for 5 seconds
+  }
+
+  public removePlayer(id: string) {
+    const instance = this.players.get(id);
+    if (!instance) return;
+
+    this.scene.remove(instance.rig.root);
+
+    // Dispose meshes
+    instance.rig.root.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        mesh.geometry?.dispose();
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((m) => m.dispose());
+        } else {
+          mesh.material?.dispose();
+        }
+      }
+    });
+
+    this.players.delete(id);
+  }
+
+  public update(delta: number) {
+    this.players.forEach((instance) => {
+      // Exponential position damping towards target
+      instance.currentPos.x = THREE.MathUtils.damp(instance.currentPos.x, instance.targetPos.x, 14, delta);
+      instance.currentPos.y = THREE.MathUtils.damp(instance.currentPos.y, instance.targetPos.y, 14, delta);
+      instance.currentPos.z = THREE.MathUtils.damp(instance.currentPos.z, instance.targetPos.z, 14, delta);
+
+      // Shortest angle interpolation for Y rotation
+      let diff = (instance.targetRotY - instance.currentRotY) % (Math.PI * 2);
+      if (diff < -Math.PI) diff += Math.PI * 2;
+      if (diff > Math.PI) diff -= Math.PI * 2;
+      instance.currentRotY += diff * Math.min(1, delta * 12);
+
+      instance.rig.root.position.copy(instance.currentPos);
+      instance.rig.root.rotation.y = instance.currentRotY;
+
+      // Animate character limbs
+      animateCharacterRig(instance.rig, delta, instance.isMoving, instance.isJumping);
+
+      // Update speech bubble timeout
+      if (instance.activeSpeechBubble) {
+        instance.speechBubbleTimer -= delta;
+        if (instance.speechBubbleTimer <= 0) {
+          instance.activeSpeechBubble = null;
+        }
+      }
+    });
+  }
+
+  public clear() {
+    this.players.forEach((_, id) => this.removePlayer(id));
+  }
+}

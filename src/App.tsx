@@ -1,0 +1,630 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { CameraPreset, ChatMessage, PlayerData, Vector3D } from './types/game.ts';
+import { soundEngine } from './game/audio.ts';
+import { animateCharacterRig, CharacterRig, createCharacter } from './game/character.ts';
+import { buildNatureWorld, getTerrainHeight, WorldEnvironment } from './game/world.ts';
+import { ThirdPersonCamera } from './game/camera.ts';
+import { networkManager } from './game/network.ts';
+import { RemotePlayerInstance, RemotePlayersManager } from './game/remotePlayers.ts';
+import { WorldEntryModal } from './components/WorldEntryModal.tsx';
+import { ChatOverlay } from './components/ChatOverlay.tsx';
+import { BottomDock } from './components/BottomDock.tsx';
+import { OnlinePlayersModal } from './components/OnlinePlayersModal.tsx';
+import { ControlsHelpModal } from './components/ControlsHelpModal.tsx';
+import { BillboardLabels } from './components/BillboardLabels.tsx';
+import { Compass, Users, Sparkles } from 'lucide-react';
+
+export default function App() {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // User State
+  const [hasEntered, setHasEntered] = useState(false);
+  const [selfNickname, setSelfNickname] = useState('탐험가');
+  const [selfColor, setSelfColor] = useState('#3b82f6');
+  const [selfId, setSelfId] = useState<string | null>(null);
+
+  // UI Modals & State
+  const [isChatFocused, setIsChatFocused] = useState(false);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset>('normal');
+  const [isMuted, setIsMuted] = useState(false);
+  const [isPlayersModalOpen, setIsPlayersModalOpen] = useState(false);
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+
+  // Game data state for 2D overlays
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [playerList, setPlayerList] = useState<PlayerData[]>([]);
+  const [selfPosState, setSelfPosState] = useState<Vector3D>({ x: 0, y: 0, z: 8 });
+  const [selfSpeechBubble, setSelfSpeechBubble] = useState<string | null>(null);
+  const [activeRemotePlayers, setActiveRemotePlayers] = useState<RemotePlayerInstance[]>([]);
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+
+  // Three.js References
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const tpCameraRef = useRef<ThirdPersonCamera | null>(null);
+  const localRigRef = useRef<CharacterRig | null>(null);
+  const remoteMgrRef = useRef<RemotePlayersManager | null>(null);
+  const worldEnvRef = useRef<WorldEnvironment | null>(null);
+
+  // Player Kinematics
+  const playerPosRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 8));
+  const playerVelocityRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  const playerRotYRef = useRef<number>(Math.PI);
+  const isGroundedRef = useRef<boolean>(true);
+  const isMovingRef = useRef<boolean>(false);
+  const isJumpingRef = useRef<boolean>(false);
+
+  // Input Keys State
+  const keysRef = useRef<{
+    w: boolean;
+    s: boolean;
+    a: boolean;
+    d: boolean;
+    space: boolean;
+  }>({
+    w: false,
+    s: false,
+    a: false,
+    d: false,
+    space: false,
+  });
+
+  // Mouse Orbit Dragging State
+  const isMouseDownRef = useRef<boolean>(false);
+  const lastMousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Self speech bubble timer ref
+  const selfBubbleTimerRef = useRef<number>(0);
+
+  // Handle entering the world
+  const handleJoinWorld = (nickname: string, color: string) => {
+    setSelfNickname(nickname);
+    setSelfColor(color);
+    setHasEntered(true);
+
+    // Initialize local character rig with chosen color
+    if (localRigRef.current) {
+      // Re-create rig with new color
+      const scene = localRigRef.current.root.parent as THREE.Scene | null;
+      if (scene) {
+        scene.remove(localRigRef.current.root);
+        const newRig = createCharacter(color);
+        newRig.root.position.copy(playerPosRef.current);
+        newRig.root.rotation.y = playerRotYRef.current;
+        scene.add(newRig.root);
+        localRigRef.current = newRig;
+      }
+    }
+
+    // Connect and join via Socket.IO
+    networkManager.joinWorld(nickname, color);
+    soundEngine.startCampfireAmbience();
+  };
+
+  // Handle sending chat
+  const handleSendMessage = useCallback((text: string) => {
+    networkManager.sendChat(text);
+    setSelfSpeechBubble(text);
+    selfBubbleTimerRef.current = 5.0; // 5 seconds
+    soundEngine.playChatChime();
+  }, []);
+
+  // Handle camera preset change
+  const handleSelectPreset = (preset: CameraPreset) => {
+    setCameraPreset(preset);
+    tpCameraRef.current?.setPreset(preset);
+  };
+
+  // Handle audio mute toggle
+  const handleToggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    soundEngine.setMuted(nextMuted);
+  };
+
+  // Initialize Three.js Scene and Game Loop
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Detect software WebGL per Three.js guidelines
+    const isSoftwareGl = (() => {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      if (!gl) return true;
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
+      const gpu = String(gl.getParameter(param));
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
+    })();
+
+    // 1. Scene & Environment
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#bae6fd'); // Soft sky blue
+    scene.fog = new THREE.FogExp2('#bae6fd', 0.016); // Horizon fog match
+
+    // 2. Camera
+    const camera = new THREE.PerspectiveCamera(
+      55,
+      container.clientWidth / container.clientHeight,
+      0.1,
+      250
+    );
+    cameraRef.current = camera;
+    const tpCamera = new ThirdPersonCamera(camera);
+    tpCameraRef.current = tpCamera;
+
+    // 3. Renderer
+    const renderer = new THREE.WebGLRenderer({
+      antialias: !isSoftwareGl,
+      powerPreference: 'high-performance',
+    });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    renderer.shadowMap.enabled = !isSoftwareGl;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    container.appendChild(renderer.domElement);
+
+    // Studio Environment lighting
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmremGenerator.dispose();
+
+    // Natural Sunlight Rig (Key + Fill)
+    const sunLight = new THREE.DirectionalLight('#fffbeb', 1.8);
+    sunLight.position.set(35, 45, 25);
+    sunLight.castShadow = !isSoftwareGl;
+    sunLight.shadow.mapSize.width = 2048;
+    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.camera.near = 10;
+    sunLight.shadow.camera.far = 110;
+    sunLight.shadow.camera.left = -35;
+    sunLight.shadow.camera.right = 35;
+    sunLight.shadow.camera.top = 35;
+    sunLight.shadow.camera.bottom = -35;
+    sunLight.shadow.bias = -0.0005;
+    sunLight.shadow.normalBias = 0.02;
+    scene.add(sunLight);
+
+    const hemiLight = new THREE.HemisphereLight('#bae6fd', '#4d7c0f', 0.85);
+    scene.add(hemiLight);
+
+    // 4. Build Nature World
+    const worldEnv = buildNatureWorld(scene);
+    worldEnvRef.current = worldEnv;
+
+    // 5. Build Local Player Character Rig
+    const localRig = createCharacter(selfColor);
+    localRig.root.position.copy(playerPosRef.current);
+    scene.add(localRig.root);
+    localRigRef.current = localRig;
+
+    // 6. Build Remote Players Manager
+    const remoteMgr = new RemotePlayersManager(scene);
+    remoteMgrRef.current = remoteMgr;
+
+    // 7. Network Event Subscriptions
+    networkManager.connect();
+
+    networkManager.onWorldInit((data) => {
+      setSelfId(data.selfId);
+      setChatMessages(data.chatHistory || []);
+
+      // Add existing remote players
+      data.players.forEach((p) => {
+        if (p.id !== data.selfId) {
+          remoteMgr.addPlayer(p);
+        }
+      });
+      setPlayerList(data.players);
+      setActiveRemotePlayers(Array.from(remoteMgr.players.values()));
+    });
+
+    networkManager.onPlayerJoined((player) => {
+      if (player.id !== networkManager.selfId) {
+        remoteMgr.addPlayer(player);
+        setPlayerList((prev) => [...prev.filter((p) => p.id !== player.id), player]);
+        setActiveRemotePlayers(Array.from(remoteMgr.players.values()));
+      }
+    });
+
+    networkManager.onPlayerMoved((data) => {
+      remoteMgr.updatePlayerTransform(
+        data.id,
+        data.position,
+        data.rotationY,
+        data.isMoving,
+        data.isJumping
+      );
+    });
+
+    networkManager.onPlayerLeft((data) => {
+      remoteMgr.removePlayer(data.id);
+      setPlayerList((prev) => prev.filter((p) => p.id !== data.id));
+      setActiveRemotePlayers(Array.from(remoteMgr.players.values()));
+    });
+
+    networkManager.onChatMessage((msg) => {
+      setChatMessages((prev) => [...prev, msg]);
+      soundEngine.playChatChime();
+
+      // If remote player sent message, attach speech bubble
+      if (msg.playerId !== networkManager.selfId && msg.playerId !== 'system') {
+        remoteMgr.setSpeechBubble(msg.playerId, msg.text);
+        setActiveRemotePlayers(Array.from(remoteMgr.players.values()));
+      }
+    });
+
+    // 8. Event Listeners for Movement & Camera
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        // Toggle chat focus
+        setIsChatFocused((prev) => !prev);
+        return;
+      }
+
+      // If typing in chat or modal is open, ignore game keys
+      if (isChatFocused || isPlayersModalOpen || isHelpModalOpen) return;
+
+      switch (e.code) {
+        case 'KeyW':
+        case 'ArrowUp':
+          keysRef.current.w = true;
+          break;
+        case 'KeyS':
+        case 'ArrowDown':
+          keysRef.current.s = true;
+          break;
+        case 'KeyA':
+        case 'ArrowLeft':
+          keysRef.current.a = true;
+          break;
+        case 'KeyD':
+        case 'ArrowRight':
+          keysRef.current.d = true;
+          break;
+        case 'Space':
+          if (!keysRef.current.space && isGroundedRef.current) {
+            keysRef.current.space = true;
+            playerVelocityRef.current.y = 8.8; // Jump impulse
+            isGroundedRef.current = false;
+            isJumpingRef.current = true;
+            soundEngine.playJump();
+          }
+          e.preventDefault();
+          break;
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      switch (e.code) {
+        case 'KeyW':
+        case 'ArrowUp':
+          keysRef.current.w = false;
+          break;
+        case 'KeyS':
+        case 'ArrowDown':
+          keysRef.current.s = false;
+          break;
+        case 'KeyA':
+        case 'ArrowLeft':
+          keysRef.current.a = false;
+          break;
+        case 'KeyD':
+        case 'ArrowRight':
+          keysRef.current.d = false;
+          break;
+        case 'Space':
+          keysRef.current.space = false;
+          break;
+      }
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      // Allow drag rotation anywhere on canvas
+      isMouseDownRef.current = true;
+      lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isMouseDownRef.current) return;
+      const dx = e.clientX - lastMousePosRef.current.x;
+      const dy = e.clientY - lastMousePosRef.current.y;
+      lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+
+      tpCamera.rotate(dx, dy);
+    };
+
+    const handleMouseUp = () => {
+      isMouseDownRef.current = false;
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      tpCamera.zoom(e.deltaY);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('wheel', handleWheel, { passive: true });
+
+    // Resize handler
+    const handleResize = () => {
+      if (!container) return;
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+      setViewportSize({ width, height });
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    // 9. Main Animation Loop
+    let animationFrameId = 0;
+    const clock = new THREE.Clock();
+    let syncTickAccumulator = 0;
+
+    const tick = () => {
+      const delta = Math.min(0.1, clock.getDelta());
+      const elapsedTime = clock.getElapsedTime();
+
+      // A. Local Player Movement & Physics
+      if (hasEntered && !isChatFocused) {
+        const { w, s, a, d } = keysRef.current;
+        let moveX = 0;
+        let moveZ = 0;
+
+        if (w) moveZ -= 1;
+        if (s) moveZ += 1;
+        if (a) moveX -= 1;
+        if (d) moveX += 1;
+
+        const isMoving = moveX !== 0 || moveZ !== 0;
+        isMovingRef.current = isMoving;
+
+        if (isMoving) {
+          // Normalize input
+          const len = Math.hypot(moveX, moveZ);
+          moveX /= len;
+          moveZ /= len;
+
+          // Camera azimuth relative direction
+          const camAngle = tpCamera.theta;
+          const worldMoveX = moveX * Math.cos(camAngle) + moveZ * Math.sin(camAngle);
+          const worldMoveZ = -moveX * Math.sin(camAngle) + moveZ * Math.cos(camAngle);
+
+          // Turn character smoothly towards movement direction
+          const targetRot = Math.atan2(worldMoveX, worldMoveZ);
+          let rotDiff = (targetRot - playerRotYRef.current) % (Math.PI * 2);
+          if (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+          if (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+          playerRotYRef.current += rotDiff * Math.min(1, delta * 15);
+
+          // Apply move speed
+          const speed = 7.5;
+          playerPosRef.current.x += worldMoveX * speed * delta;
+          playerPosRef.current.z += worldMoveZ * speed * delta;
+
+          // Sound
+          if (isGroundedRef.current) {
+            soundEngine.playStep();
+          }
+        }
+
+        // Gravity & Jump Physics
+        const gravity = 22.0;
+        playerVelocityRef.current.y -= gravity * delta;
+        playerPosRef.current.y += playerVelocityRef.current.y * delta;
+
+        // Ground Height Check
+        const groundY = getTerrainHeight(playerPosRef.current.x, playerPosRef.current.z);
+        if (playerPosRef.current.y <= groundY) {
+          playerPosRef.current.y = groundY;
+          playerVelocityRef.current.y = 0;
+          isGroundedRef.current = true;
+          isJumpingRef.current = false;
+        }
+
+        // Clamp to world radius ~55 units
+        const distFromCenter = Math.hypot(playerPosRef.current.x, playerPosRef.current.z);
+        if (distFromCenter > 54) {
+          const ratio = 54 / distFromCenter;
+          playerPosRef.current.x *= ratio;
+          playerPosRef.current.z *= ratio;
+        }
+
+        // Update local character rig
+        if (localRigRef.current) {
+          localRigRef.current.root.position.copy(playerPosRef.current);
+          localRigRef.current.root.rotation.y = playerRotYRef.current;
+          animateCharacterRig(
+            localRigRef.current,
+            delta,
+            isMoving,
+            !isGroundedRef.current
+          );
+        }
+
+        // Campfire audio proximity
+        soundEngine.updateCampfireProximity(distFromCenter);
+
+        // Network replication tick (every ~40ms)
+        syncTickAccumulator += delta;
+        if (syncTickAccumulator >= 0.04) {
+          syncTickAccumulator = 0;
+          networkManager.sendMovement(
+            playerPosRef.current,
+            playerRotYRef.current,
+            isMoving,
+            !isGroundedRef.current
+          );
+        }
+
+        // Update speech bubble timeout
+        if (selfBubbleTimerRef.current > 0) {
+          selfBubbleTimerRef.current -= delta;
+          if (selfBubbleTimerRef.current <= 0) {
+            setSelfSpeechBubble(null);
+          }
+        }
+
+        // Periodic state sync for 2D UI overlay (distance etc)
+        setSelfPosState({
+          x: playerPosRef.current.x,
+          y: playerPosRef.current.y,
+          z: playerPosRef.current.z,
+        });
+      }
+
+      // B. Update Remote Players
+      remoteMgr.update(delta);
+
+      // C. Update World (Flames, Water)
+      worldEnv.update(delta, elapsedTime);
+
+      // D. Update Camera Follow
+      tpCamera.update(playerPosRef.current, delta);
+
+      // Render
+      renderer.render(scene, camera);
+
+      animationFrameId = requestAnimationFrame(tick);
+    };
+
+    animationFrameId = requestAnimationFrame(tick);
+
+    // Cleanup
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('resize', handleResize);
+
+      networkManager.disconnect();
+      remoteMgr.clear();
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+    };
+  }, [hasEntered]);
+
+  return (
+    <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none">
+      {/* 3D WebGL Canvas Mount Container */}
+      <div ref={containerRef} className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing" />
+
+      {/* Floating 3D -> 2D Billboard Labels (Nicknames & Speech Bubbles) */}
+      {hasEntered && (
+        <BillboardLabels
+          camera={cameraRef.current}
+          viewportSize={viewportSize}
+          selfNickname={selfNickname}
+          selfColor={selfColor}
+          selfPosition={playerPosRef.current}
+          selfSpeechBubble={selfSpeechBubble}
+          remotePlayers={activeRemotePlayers}
+        />
+      )}
+
+      {/* Top Bar Header per Design Guidelines (Zone 1: Brand, Zone 2: Single-line context, Zone 3: Status) */}
+      <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between gap-8 px-6 py-4 pointer-events-none">
+        {/* Zone 1: Single text element wordmark */}
+        <div className="flex items-center gap-2.5 pointer-events-auto bg-slate-900/80 border border-slate-700/70 rounded-xl px-3.5 py-1.5 shadow-lg">
+          <div className="w-5 h-5 rounded-lg bg-blue-600 flex items-center justify-center">
+            <Compass className="w-3.5 h-3.5 text-white" />
+          </div>
+          <span className="text-sm font-bold tracking-tight text-white whitespace-nowrap">
+            Meta World
+          </span>
+          <span className="text-xs text-slate-400 font-medium">자연 프로토타입</span>
+        </div>
+
+        {/* Zone 2: Unboxed metadata */}
+        <div className="hidden md:flex items-center gap-3 text-xs text-slate-300 font-medium bg-slate-900/60 border border-slate-700/50 rounded-xl px-4 py-1.5 backdrop-blur-xs">
+          <span>Nature 01</span>
+          <span aria-hidden="true" className="text-slate-500">·</span>
+          <span>중앙 모닥불 광장</span>
+          <span aria-hidden="true" className="text-slate-500">·</span>
+          <span>Low Poly PBR</span>
+        </div>
+
+        {/* Zone 3: Primary Action & Player status */}
+        <div className="flex items-center gap-2 pointer-events-auto">
+          {hasEntered && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 border border-slate-700/70 rounded-xl shadow-lg text-xs font-semibold text-slate-200">
+              <div
+                className="w-3 h-3 rounded-full shadow-xs"
+                style={{ backgroundColor: selfColor }}
+              />
+              <span className="truncate max-w-[100px]">{selfNickname}</span>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* Initial Entry Modal */}
+      {!hasEntered && <WorldEntryModal onJoin={handleJoinWorld} />}
+
+      {/* Real-Time Chat Overlay */}
+      {hasEntered && (
+        <ChatOverlay
+          messages={chatMessages}
+          onSendMessage={handleSendMessage}
+          selfNickname={selfNickname}
+          isChatFocused={isChatFocused}
+          setIsChatFocused={setIsChatFocused}
+        />
+      )}
+
+      {/* Unified Bottom Control Dock */}
+      {hasEntered && (
+        <BottomDock
+          currentPreset={cameraPreset}
+          onSelectPreset={handleSelectPreset}
+          isMuted={isMuted}
+          onToggleMute={handleToggleMute}
+          playerCount={playerList.length}
+          onOpenPlayersList={() => setIsPlayersModalOpen(true)}
+          onOpenControlsHelp={() => setIsHelpModalOpen(true)}
+        />
+      )}
+
+      {/* Online Players Modal */}
+      <OnlinePlayersModal
+        isOpen={isPlayersModalOpen}
+        onClose={() => setIsPlayersModalOpen(false)}
+        selfId={selfId}
+        selfPos={selfPosState}
+        players={playerList}
+      />
+
+      {/* Controls Help Modal */}
+      <ControlsHelpModal
+        isOpen={isHelpModalOpen}
+        onClose={() => setIsHelpModalOpen(false)}
+      />
+    </div>
+  );
+}

@@ -1,0 +1,212 @@
+import express from 'express';
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export interface PlayerData {
+  id: string;
+  nickname: string;
+  color: string;
+  position: { x: number; y: number; z: number };
+  rotationY: number;
+  isMoving: boolean;
+  isJumping: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  playerId: string;
+  nickname: string;
+  color: string;
+  text: string;
+  timestamp: number;
+}
+
+async function startServer() {
+  const app = express();
+  const server = http.createServer(app);
+
+  const io = new SocketIOServer(server, {
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST'],
+    },
+    transports: ['websocket', 'polling'],
+  });
+
+  const players = new Map<string, PlayerData>();
+  const chatHistory: ChatMessage[] = [];
+  const MAX_CHAT_HISTORY = 50;
+
+  // Add welcome system chat message
+  chatHistory.push({
+    id: 'sys-welcome',
+    playerId: 'system',
+    nickname: 'MetaWorld System',
+    color: '#38bdf8',
+    text: '메타월드 자연(Nature) 월드에 오신 것을 환영합니다! 다른 플레이어와 자유롭게 대화해보세요.',
+    timestamp: Date.now(),
+  });
+
+  io.on('connection', (socket) => {
+    // When a player joins with nickname and custom color
+    socket.on('player:join', (data: { nickname?: string; color?: string }) => {
+      const nickname = (data?.nickname || 'Traveler').slice(0, 16);
+      const color = data?.color || '#3b82f6';
+
+      // Spawn in a ring around the campfire (radius ~6-10 units)
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 6 + Math.random() * 4;
+      const initialPos = {
+        x: Math.sin(angle) * dist,
+        y: 0,
+        z: Math.cos(angle) * dist,
+      };
+
+      const newPlayer: PlayerData = {
+        id: socket.id,
+        nickname,
+        color,
+        position: initialPos,
+        rotationY: angle + Math.PI, // face towards campfire center
+        isMoving: false,
+        isJumping: false,
+      };
+
+      players.set(socket.id, newPlayer);
+
+      // Send current world state to joining player
+      socket.emit('init:world', {
+        selfId: socket.id,
+        players: Array.from(players.values()),
+        chatHistory,
+      });
+
+      // Broadcast join to all other connected clients
+      socket.broadcast.emit('player:joined', newPlayer);
+
+      // Broadcast system announcement
+      const joinMsg: ChatMessage = {
+        id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        playerId: 'system',
+        nickname: '시스템',
+        color: '#10b981',
+        text: `[${nickname}] 님이 월드에 입장하셨습니다.`,
+        timestamp: Date.now(),
+      };
+      chatHistory.push(joinMsg);
+      if (chatHistory.length > MAX_CHAT_HISTORY) chatHistory.shift();
+      io.emit('chat:message', joinMsg);
+    });
+
+    // High frequency movement updates
+    socket.on('player:move', (data: {
+      position: { x: number; y: number; z: number };
+      rotationY: number;
+      isMoving: boolean;
+      isJumping: boolean;
+    }) => {
+      const player = players.get(socket.id);
+      if (!player) return;
+
+      player.position = data.position;
+      player.rotationY = data.rotationY;
+      player.isMoving = !!data.isMoving;
+      player.isJumping = !!data.isJumping;
+
+      // Broadcast new position to others
+      socket.broadcast.emit('player:moved', {
+        id: socket.id,
+        position: player.position,
+        rotationY: player.rotationY,
+        isMoving: player.isMoving,
+        isJumping: player.isJumping,
+      });
+    });
+
+    // Chat message event
+    socket.on('chat:send', (data: { text: string }) => {
+      const player = players.get(socket.id);
+      if (!player) return;
+
+      const cleanText = (data?.text || '').trim().slice(0, 150);
+      if (!cleanText) return;
+
+      const chatMsg: ChatMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        playerId: socket.id,
+        nickname: player.nickname,
+        color: player.color,
+        text: cleanText,
+        timestamp: Date.now(),
+      };
+
+      chatHistory.push(chatMsg);
+      if (chatHistory.length > MAX_CHAT_HISTORY) {
+        chatHistory.shift();
+      }
+
+      io.emit('chat:message', chatMsg);
+    });
+
+    // Disconnect event
+    socket.on('disconnect', () => {
+      const player = players.get(socket.id);
+      if (player) {
+        players.delete(socket.id);
+        io.emit('player:left', { id: socket.id });
+
+        const leaveMsg: ChatMessage = {
+          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          playerId: 'system',
+          nickname: '시스템',
+          color: '#ef4444',
+          text: `[${player.nickname}] 님이 퇴장하셨습니다.`,
+          timestamp: Date.now(),
+        };
+        chatHistory.push(leaveMsg);
+        if (chatHistory.length > MAX_CHAT_HISTORY) chatHistory.shift();
+        io.emit('chat:message', leaveMsg);
+      }
+    });
+  });
+
+  // REST API status endpoint
+  app.get('/api/status', (_req, res) => {
+    res.json({
+      status: 'ok',
+      activePlayers: players.size,
+      time: new Date().toISOString(),
+    });
+  });
+
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    });
+  }
+
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`[MetaWorld] Server running on port ${port} (mode: ${isProduction ? 'production' : 'development'})`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('[MetaWorld] Fatal server initialization error:', err);
+  process.exit(1);
+});
