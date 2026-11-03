@@ -8,10 +8,25 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export interface CharacterAppearance {
+  shirtColor: string;
+  pantsColor?: string;
+  skinColor?: string;
+  hairColor?: string;
+  hairStyle?: string;
+  outfit?: string;
+  accessory?: string;
+  faceStyle?: string;
+}
+
+export type CharacterEmote = 'none' | 'wave' | 'dance' | 'salute' | 'cheer' | 'clap' | 'sit';
+
 export interface PlayerData {
   id: string;
   nickname: string;
   color: string;
+  appearance?: CharacterAppearance;
+  emote?: CharacterEmote;
   position: { x: number; y: number; z: number };
   rotationY: number;
   isMoving: boolean;
@@ -48,7 +63,10 @@ async function startServer() {
       methods: ['GET', 'POST'],
       credentials: true,
     },
-    transports: ['websocket', 'polling'],
+    transports: ['polling', 'websocket'],
+    allowUpgrades: true,
+    pingTimeout: 30000,
+    pingInterval: 15000,
   });
 
   const players = new Map<string, PlayerData>();
@@ -66,10 +84,10 @@ async function startServer() {
   });
 
   io.on('connection', (socket) => {
-    // When a player joins with nickname and custom color
-    socket.on('player:join', (data: { nickname?: string; color?: string }) => {
+    // When a player joins with nickname and custom color & appearance
+    socket.on('player:join', (data: { nickname?: string; color?: string; appearance?: CharacterAppearance }) => {
       const nickname = (data?.nickname || 'Traveler').slice(0, 16);
-      const color = data?.color || '#3b82f6';
+      const color = data?.appearance?.shirtColor || data?.color || '#3b82f6';
 
       // Spawn in a spacious open ring around the campfire (radius ~4.8 - 6.8 units)
       const angle = Math.random() * Math.PI * 2;
@@ -84,6 +102,8 @@ async function startServer() {
         id: socket.id,
         nickname,
         color,
+        appearance: data?.appearance,
+        emote: 'none',
         position: initialPos,
         rotationY: angle + Math.PI, // face towards campfire center
         isMoving: false,
@@ -116,12 +136,39 @@ async function startServer() {
       io.emit('chat:message', joinMsg);
     });
 
+    // Appearance change event
+    socket.on('player:appearance', (data: { appearance: CharacterAppearance }) => {
+      const player = players.get(socket.id);
+      if (!player) return;
+      player.appearance = data?.appearance;
+      if (data?.appearance?.shirtColor) {
+        player.color = data.appearance.shirtColor;
+      }
+      io.emit('player:appearance_updated', {
+        id: socket.id,
+        appearance: player.appearance,
+        color: player.color,
+      });
+    });
+
+    // Emote animation event
+    socket.on('player:emote', (data: { emote: CharacterEmote }) => {
+      const player = players.get(socket.id);
+      if (!player) return;
+      player.emote = data?.emote || 'none';
+      io.emit('player:emoted', {
+        id: socket.id,
+        emote: player.emote,
+      });
+    });
+
     // High frequency movement updates
     socket.on('player:move', (data: {
       position: { x: number; y: number; z: number };
       rotationY: number;
       isMoving: boolean;
       isJumping: boolean;
+      emote?: CharacterEmote;
     }) => {
       const player = players.get(socket.id);
       if (!player) return;
@@ -130,6 +177,9 @@ async function startServer() {
       player.rotationY = data.rotationY;
       player.isMoving = !!data.isMoving;
       player.isJumping = !!data.isJumping;
+      if (data.emote !== undefined) {
+        player.emote = data.emote;
+      }
 
       // Broadcast new position to others
       socket.broadcast.emit('player:moved', {
@@ -138,6 +188,7 @@ async function startServer() {
         rotationY: player.rotationY,
         isMoving: player.isMoving,
         isJumping: player.isJumping,
+        emote: player.emote,
       });
     });
 

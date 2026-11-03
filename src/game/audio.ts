@@ -184,6 +184,90 @@ class SoundEngine {
     const targetGain = clamped * 0.05;
     this.campfireGainNode.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.2);
   }
+
+  // Emote audio feedback
+  public playEmoteSound(emote: string) {
+    if (this.isMuted) return;
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      if (emote === 'cheer') {
+        // Joyful fanfare chord
+        [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now + i * 0.06);
+          gain.gain.setValueAtTime(0.04, now + i * 0.06);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.06 + 0.3);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.06);
+          osc.stop(now + i * 0.06 + 0.32);
+        });
+      } else if (emote === 'clap') {
+        // Double handclap snap
+        [0, 0.15].forEach((delay) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(320, now + delay);
+          osc.frequency.exponentialRampToValueAtTime(80, now + delay + 0.05);
+          gain.gain.setValueAtTime(0.06, now + delay);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.06);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + delay);
+          osc.stop(now + delay + 0.07);
+        });
+      } else if (emote === 'dance') {
+        // Bouncy synth beat
+        [440, 554.37, 659.25].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + i * 0.1);
+          gain.gain.setValueAtTime(0.04, now + i * 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.2);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.1);
+          osc.stop(now + i * 0.1 + 0.22);
+        });
+      } else if (emote === 'wave') {
+        // Friendly soft woosh
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(660, now + 0.15);
+        gain.gain.setValueAtTime(0.04, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.24);
+      } else if (emote === 'salute') {
+        // Crisp brass horn salute fanfare
+        [440, 659.25, 880].forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.05);
+          gain.gain.setValueAtTime(0.045, now + idx * 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.22);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.05);
+          osc.stop(now + idx * 0.05 + 0.24);
+        });
+      }
+    } catch {
+      // Audio error ignored
+    }
+  }
 }
 
 export const soundEngine = new SoundEngine();

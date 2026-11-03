@@ -53,22 +53,7 @@ export const ChatOverlay: React.FC<ChatOverlayProps> = ({
 
   return (
     <>
-      {/* 1. Mobile Floating Chat Toggle Button (Visible on mobile, top-right below header) */}
-      <div className="fixed top-16 right-4 z-30 md:hidden flex items-center">
-        <button
-          type="button"
-          onClick={() => setIsMobileDrawerOpen(!isMobileDrawerOpen)}
-          className="relative min-w-[44px] min-h-[44px] px-3 py-2 bg-slate-900/90 border border-slate-700/80 rounded-full text-white shadow-xl flex items-center gap-1.5 text-xs font-semibold backdrop-blur-xs active:scale-95 transition-all"
-        >
-          <MessageSquare className="w-4 h-4 text-blue-400" />
-          <span>채팅</span>
-          {messages.length > 0 && (
-            <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping absolute -top-0.5 -right-0.5" />
-          )}
-        </button>
-      </div>
-
-      {/* 2. Mobile Full Bottom Sheet Drawer (Only visible on mobile when open) */}
+      {/* 1. Mobile Full Bottom Sheet Drawer (Only visible on mobile when open) */}
       {isMobileDrawerOpen && (
         <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs flex flex-col justify-end md:hidden animate-in fade-in duration-150">
           <div className="w-full bg-slate-900 border-t border-slate-700 rounded-t-3xl shadow-2xl flex flex-col max-h-[75vh] overflow-hidden">

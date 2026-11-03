@@ -6,9 +6,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { CameraPreset, ChatMessage, PlayerData, Vector3D } from './types/game.ts';
+import { CameraPreset, CharacterAppearance, CharacterEmote, ChatMessage, PlayerData, Vector3D } from './types/game.ts';
 import { soundEngine } from './game/audio.ts';
-import { animateCharacterRig, CharacterRig, createCharacter } from './game/character.ts';
+import {
+  animateCharacterRig,
+  CharacterRig,
+  createCharacter,
+  CHARACTER_PRESETS,
+  DEFAULT_APPEARANCE,
+} from './game/character.ts';
 import { buildNatureWorld, getTerrainHeight, WorldEnvironment } from './game/world.ts';
 import { ThirdPersonCamera } from './game/camera.ts';
 import { networkManager } from './game/network.ts';
@@ -20,7 +26,10 @@ import { ControlsHelpModal } from './components/ControlsHelpModal.tsx';
 import { createNameplateSprite, createSpeechBubbleSprite } from './game/nameplate.ts';
 import { ServerConfigModal } from './components/ServerConfigModal.tsx';
 import { VirtualJoystick, TouchJumpButton } from './components/VirtualJoystick.tsx';
-import { Compass, Server, Users, Volume2, VolumeX, HelpCircle } from 'lucide-react';
+import { EmoteBar } from './components/EmoteBar.tsx';
+import { CharacterCustomizerModal } from './components/CharacterCustomizerModal.tsx';
+import { MobileQuickMenu } from './components/MobileQuickMenu.tsx';
+import { Compass, Server, Users, Volume2, VolumeX, HelpCircle, Shirt, Video, MoreHorizontal, MessageSquare } from 'lucide-react';
 
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -29,16 +38,15 @@ export default function App() {
   const [hasEntered, setHasEntered] = useState(false);
   const hasEnteredRef = useRef(false);
   const [selfNickname, setSelfNickname] = useState('탐험가');
-  const [selfColor, setSelfColor] = useState('#3b82f6');
+  const [selfColor, setSelfColor] = useState(CHARACTER_PRESETS[0].appearance.shirtColor);
+  const [selfAppearance, setSelfAppearance] = useState<CharacterAppearance>(CHARACTER_PRESETS[0].appearance);
+  const [currentEmote, setCurrentEmote] = useState<CharacterEmote>('none');
   const [selfId, setSelfId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Mobile / Touch detection
-  const [isTouchDevice, setIsTouchDevice] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
-  });
+  // Mobile drawers & menus
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const touchMoveRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
 
   // UI Modals & State
@@ -48,12 +56,12 @@ export default function App() {
   const [isPlayersModalOpen, setIsPlayersModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [isServerModalOpen, setIsServerModalOpen] = useState(false);
+  const [isWardrobeOpen, setIsWardrobeOpen] = useState(false);
 
   // Game data state for 2D overlays
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [playerList, setPlayerList] = useState<PlayerData[]>([]);
   const [selfPosState, setSelfPosState] = useState<Vector3D>({ x: 0, y: 0, z: 5.5 });
-  const [selfSpeechBubble, setSelfSpeechBubble] = useState<string | null>(null);
   const [activeRemotePlayers, setActiveRemotePlayers] = useState<RemotePlayerInstance[]>([]);
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({
     width: typeof window !== 'undefined' ? window.innerWidth : 1280,
@@ -94,17 +102,15 @@ export default function App() {
   const isMouseDownRef = useRef<boolean>(false);
   const lastMousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Self speech bubble timer ref
-  const selfBubbleTimerRef = useRef<number>(0);
-
   // Handle entering the world
-  const handleJoinWorld = (nickname: string, color: string) => {
+  const handleJoinWorld = (nickname: string, color: string, appearance: CharacterAppearance) => {
     hasEnteredRef.current = true;
     setSelfNickname(nickname);
     setSelfColor(color);
+    setSelfAppearance(appearance);
     setHasEntered(true);
 
-    // Initialize local character rig with chosen color and 3D overhead nameplate
+    // Initialize local character rig with chosen appearance and 3D overhead nameplate
     if (localRigRef.current) {
       const scene = localRigRef.current.root.parent as THREE.Scene | null;
       if (scene) {
@@ -117,7 +123,8 @@ export default function App() {
           localRigRef.current.speechBubbleSprite.material.dispose();
         }
         scene.remove(localRigRef.current.root);
-        const newRig = createCharacter(color);
+
+        const newRig = createCharacter(appearance);
         newRig.root.position.copy(playerPosRef.current);
         newRig.root.rotation.y = playerRotYRef.current;
         const nameplate = createNameplateSprite(nickname, color, true);
@@ -129,9 +136,81 @@ export default function App() {
     }
 
     // Connect and join via Socket.IO
-    networkManager.joinWorld(nickname, color);
+    networkManager.joinWorld(nickname, color, appearance);
     soundEngine.startCampfireAmbience();
   };
+
+  // Handle character wardrobe / appearance change during gameplay
+  const handleApplyAppearance = (newAppearance: CharacterAppearance) => {
+    setSelfAppearance(newAppearance);
+    if (newAppearance.shirtColor) {
+      setSelfColor(newAppearance.shirtColor);
+    }
+
+    if (localRigRef.current) {
+      const scene = localRigRef.current.root.parent as THREE.Scene | null;
+      if (scene) {
+        const pos = playerPosRef.current.clone();
+        const rotY = playerRotYRef.current;
+        const nameplate = localRigRef.current.nameplateSprite;
+        const bubble = localRigRef.current.speechBubbleSprite;
+        const bubbleTimer = localRigRef.current.speechBubbleTimer;
+
+        if (nameplate) localRigRef.current.root.remove(nameplate);
+        if (bubble) localRigRef.current.root.remove(bubble);
+
+        scene.remove(localRigRef.current.root);
+
+        // Dispose previous meshes
+        localRigRef.current.root.traverse((obj) => {
+          if ((obj as THREE.Mesh).isMesh) {
+            const mesh = obj as THREE.Mesh;
+            mesh.geometry?.dispose();
+            if (Array.isArray(mesh.material)) {
+              mesh.material.forEach((m) => m.dispose());
+            } else {
+              mesh.material?.dispose();
+            }
+          }
+        });
+
+        const newRig = createCharacter(newAppearance);
+        newRig.root.position.copy(pos);
+        newRig.root.rotation.y = rotY;
+        newRig.currentEmote = localRigRef.current.currentEmote;
+        newRig.emoteTime = localRigRef.current.emoteTime;
+
+        if (nameplate) {
+          newRig.nameplateSprite = nameplate;
+          newRig.root.add(nameplate);
+        }
+        if (bubble) {
+          newRig.speechBubbleSprite = bubble;
+          newRig.speechBubbleTimer = bubbleTimer;
+          newRig.root.add(bubble);
+        }
+
+        scene.add(newRig.root);
+        localRigRef.current = newRig;
+      }
+    }
+
+    networkManager.sendAppearance(newAppearance);
+  };
+
+  // Handle trigger emote animation
+  const triggerEmote = useCallback((emote: CharacterEmote) => {
+    if (!localRigRef.current) return;
+    const nextEmote = localRigRef.current.currentEmote === emote ? 'none' : emote;
+    localRigRef.current.currentEmote = nextEmote;
+    localRigRef.current.emoteTime = 0;
+    setCurrentEmote(nextEmote);
+
+    if (nextEmote !== 'none') {
+      soundEngine.playEmoteSound(nextEmote);
+    }
+    networkManager.sendEmote(nextEmote);
+  }, []);
 
   // Handle sending chat
   const handleSendMessage = useCallback((text: string) => {
@@ -155,6 +234,14 @@ export default function App() {
     tpCameraRef.current?.setPreset(preset);
   };
 
+  // Cycle camera preset for minimal mobile controls
+  const handleCycleCameraPreset = () => {
+    const presets: CameraPreset[] = ['close', 'normal', 'far', 'top'];
+    const currentIndex = presets.indexOf(cameraPreset);
+    const nextPreset = presets[(currentIndex + 1) % presets.length];
+    handleSelectPreset(nextPreset);
+  };
+
   // Handle audio mute toggle
   const handleToggleMute = () => {
     const nextMuted = !isMuted;
@@ -168,6 +255,10 @@ export default function App() {
       playerVelocityRef.current.y = 8.8; // Jump impulse
       isGroundedRef.current = false;
       isJumpingRef.current = true;
+      if (localRigRef.current && localRigRef.current.currentEmote !== 'none') {
+        localRigRef.current.currentEmote = 'none';
+        setCurrentEmote('none');
+      }
       soundEngine.playJump();
     }
   }, []);
@@ -201,54 +292,33 @@ export default function App() {
       250
     );
     cameraRef.current = camera;
-    const tpCamera = new ThirdPersonCamera(camera);
-    tpCameraRef.current = tpCamera;
 
-    // 3. Renderer
+    // 3. Renderer with hardware/software conditional settings
     const renderer = new THREE.WebGLRenderer({
       antialias: !isSoftwareGl,
       powerPreference: 'high-performance',
+      precision: isSoftwareGl ? 'mediump' : 'highp',
     });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
     renderer.shadowMap.enabled = !isSoftwareGl;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
 
-    container.appendChild(renderer.domElement);
-
-    // Studio Environment lighting
+    // Fast IBL Lighting via RoomEnvironment
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
     pmremGenerator.dispose();
 
-    // Natural Sunlight Rig (Key + Fill)
-    const sunLight = new THREE.DirectionalLight('#fffbeb', 1.8);
-    sunLight.position.set(35, 45, 25);
-    sunLight.castShadow = !isSoftwareGl;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
-    sunLight.shadow.camera.near = 10;
-    sunLight.shadow.camera.far = 110;
-    sunLight.shadow.camera.left = -35;
-    sunLight.shadow.camera.right = 35;
-    sunLight.shadow.camera.top = 35;
-    sunLight.shadow.camera.bottom = -35;
-    sunLight.shadow.bias = -0.0005;
-    sunLight.shadow.normalBias = 0.02;
-    scene.add(sunLight);
+    container.replaceChildren(renderer.domElement);
 
-    const hemiLight = new THREE.HemisphereLight('#bae6fd', '#4d7c0f', 0.85);
-    scene.add(hemiLight);
-
-    // 4. Build Nature World
+    // 4. Build Low-Poly Nature World
     const worldEnv = buildNatureWorld(scene);
     worldEnvRef.current = worldEnv;
 
     // 5. Build Local Player Character Rig
-    const localRig = createCharacter(selfColor);
+    const localRig = createCharacter(selfAppearance);
     localRig.root.position.copy(playerPosRef.current);
     const localNameplate = createNameplateSprite(selfNickname, selfColor, true);
     localRig.nameplateSprite = localNameplate;
@@ -293,8 +363,20 @@ export default function App() {
         data.position,
         data.rotationY,
         data.isMoving,
-        data.isJumping
+        data.isJumping,
+        data.emote
       );
+    });
+
+    networkManager.onPlayerAppearanceUpdated((data) => {
+      remoteMgr.updatePlayerAppearance(data.id, data.appearance);
+      setPlayerList((prev) =>
+        prev.map((p) => (p.id === data.id ? { ...p, appearance: data.appearance, color: data.color } : p))
+      );
+    });
+
+    networkManager.onPlayerEmoted((data) => {
+      remoteMgr.setPlayerEmote(data.id, data.emote);
     });
 
     networkManager.onPlayerLeft((data) => {
@@ -314,14 +396,32 @@ export default function App() {
       }
     });
 
-    // 8. Event Listeners for Movement & Camera (Keyboard)
+    // 8. Event Listeners for Movement, Emotes & Camera (Keyboard)
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
         setIsChatFocused((prev) => !prev);
         return;
       }
 
-      if (isChatFocused || isPlayersModalOpen || isHelpModalOpen || isServerModalOpen) return;
+      if (isChatFocused || isPlayersModalOpen || isHelpModalOpen || isServerModalOpen || isWardrobeOpen) return;
+
+      // Emote Hotkeys 1-5
+      if (e.key === '1') {
+        triggerEmote('wave');
+        return;
+      } else if (e.key === '2') {
+        triggerEmote('dance');
+        return;
+      } else if (e.key === '3') {
+        triggerEmote('salute');
+        return;
+      } else if (e.key === '4') {
+        triggerEmote('cheer');
+        return;
+      } else if (e.key === '5') {
+        triggerEmote('clap');
+        return;
+      }
 
       switch (e.code) {
         case 'KeyW':
@@ -381,12 +481,11 @@ export default function App() {
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isMouseDownRef.current) return;
+      if (!isMouseDownRef.current || !tpCameraRef.current) return;
       const dx = e.clientX - lastMousePosRef.current.x;
       const dy = e.clientY - lastMousePosRef.current.y;
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-
-      tpCamera.rotate(dx, dy);
+      tpCameraRef.current.rotate(dx, dy);
     };
 
     const handleMouseUp = () => {
@@ -394,128 +493,132 @@ export default function App() {
     };
 
     const handleWheel = (e: WheelEvent) => {
-      tpCamera.zoom(e.deltaY);
+      if (!tpCameraRef.current) return;
+      tpCameraRef.current.zoom(e.deltaY);
     };
 
-    // Touch Listeners on Canvas (1-finger camera orbit, 2-finger pinch zoom)
-    let lastTouchPos: { x: number; y: number } | null = null;
-    let lastPinchDist: number | null = null;
+    // Touch orbit dragging for mobile
+    let touchStartPos = { x: 0, y: 0 };
+    let initialPinchDistance = 0;
 
     const handleTouchStart = (e: TouchEvent) => {
-      if (e.target !== renderer.domElement) return;
-
       if (e.touches.length === 1) {
-        lastTouchPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        lastPinchDist = null;
+        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       } else if (e.touches.length === 2) {
-        lastTouchPos = null;
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        lastPinchDist = Math.hypot(dx, dy);
+        initialPinchDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
       }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.target !== renderer.domElement) return;
-
-      if (e.touches.length === 1 && lastTouchPos) {
-        const dx = e.touches[0].clientX - lastTouchPos.x;
-        const dy = e.touches[0].clientY - lastTouchPos.y;
-        lastTouchPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        tpCamera.rotate(dx * 1.25, dy * 1.25);
-      } else if (e.touches.length === 2 && lastPinchDist !== null) {
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const currentDist = Math.hypot(dx, dy);
-        const deltaDist = currentDist - lastPinchDist;
-        lastPinchDist = currentDist;
-        tpCamera.zoom(-deltaDist * 14);
+      if (e.touches.length === 1 && tpCameraRef.current) {
+        const dx = e.touches[0].clientX - touchStartPos.x;
+        const dy = e.touches[0].clientY - touchStartPos.y;
+        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        tpCameraRef.current.rotate(dx * 1.5, dy * 1.5);
+      } else if (e.touches.length === 2 && tpCameraRef.current) {
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const delta = initialPinchDistance - dist;
+        tpCameraRef.current.zoom(delta * 0.5);
+        initialPinchDistance = dist;
       }
     };
 
-    const handleTouchEnd = () => {
-      lastTouchPos = null;
-      lastPinchDist = null;
-    };
+    const canvasDom = renderer.domElement;
+    canvasDom.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    canvasDom.addEventListener('wheel', handleWheel, { passive: true });
+
+    canvasDom.addEventListener('touchstart', handleTouchStart, { passive: true });
+    canvasDom.addEventListener('touchmove', handleTouchMove, { passive: true });
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('wheel', handleWheel, { passive: true });
 
-    const domCanvas = renderer.domElement;
-    domCanvas.addEventListener('touchstart', handleTouchStart, { passive: true });
-    domCanvas.addEventListener('touchmove', handleTouchMove, { passive: true });
-    domCanvas.addEventListener('touchend', handleTouchEnd, { passive: true });
-    domCanvas.addEventListener('touchcancel', handleTouchEnd, { passive: true });
-
-    // Resize handler
+    // 9. Resize Handler
     const handleResize = () => {
       if (!container) return;
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-      camera.aspect = width / height;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
-      setViewportSize({ width, height });
-      setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024);
+      renderer.setSize(w, h);
+      setViewportSize({ width: w, height: h });
     };
 
     window.addEventListener('resize', handleResize);
 
-    // 9. Main Animation Loop
-    let animationFrameId = 0;
+    // 10. Third-Person Camera Rig
+    const tpCamera = new ThirdPersonCamera(camera);
+    tpCameraRef.current = tpCamera;
+
+    // 11. Main Animation Game Loop (Clock driven)
     const clock = new THREE.Clock();
+    let animFrameId: number;
     let syncTickAccumulator = 0;
     let billboardSyncAccumulator = 0;
 
-    const tick = () => {
-      const delta = Math.min(0.1, clock.getDelta());
-      const elapsedTime = clock.getElapsedTime();
+    const gameLoop = () => {
+      animFrameId = requestAnimationFrame(gameLoop);
+      const delta = Math.min(clock.getDelta(), 0.1); // Cap delta to prevent tunneling
 
-      // A. Local Player Movement & Physics
-      if (hasEnteredRef.current && !isChatFocused) {
-        const { w, s, a, d } = keysRef.current;
-        const tMove = touchMoveRef.current;
+      // Animate ambient world objects (water waves, campfire light flicker)
+      worldEnv.update(delta, clock.getElapsedTime());
 
-        // Combine Keyboard + Virtual Touch Joystick
-        let moveX = tMove.x;
-        let moveZ = tMove.z;
+      // A. Player Movement & Physics (when entered)
+      if (hasEnteredRef.current) {
+        let moveX = 0;
+        let moveZ = 0;
 
-        if (w) moveZ -= 1;
-        if (s) moveZ += 1;
-        if (a) moveX -= 1;
-        if (d) moveX += 1;
+        // Keyboard input
+        if (!isChatFocused) {
+          if (keysRef.current.w) moveZ -= 1;
+          if (keysRef.current.s) moveZ += 1;
+          if (keysRef.current.a) moveX -= 1;
+          if (keysRef.current.d) moveX += 1;
+        }
 
-        const isMoving = Math.abs(moveX) > 0.05 || Math.abs(moveZ) > 0.05;
+        // Virtual joystick touch input (normalized -1 to 1)
+        if (Math.abs(touchMoveRef.current.x) > 0.05 || Math.abs(touchMoveRef.current.z) > 0.05) {
+          moveX = touchMoveRef.current.x;
+          moveZ = touchMoveRef.current.z;
+        }
+
+        const inputLen = Math.hypot(moveX, moveZ);
+        const isMoving = inputLen > 0.1;
         isMovingRef.current = isMoving;
 
+        // Reset sitting or waving emote if player starts walking
+        if (isMoving && localRigRef.current && localRigRef.current.currentEmote !== 'none') {
+          localRigRef.current.currentEmote = 'none';
+          setCurrentEmote('none');
+        }
+
         if (isMoving) {
-          // Clamp/normalize input magnitude
-          const len = Math.hypot(moveX, moveZ);
-          if (len > 1) {
-            moveX /= len;
-            moveZ /= len;
-          }
+          const normX = moveX / inputLen;
+          const normZ = moveZ / inputLen;
 
-          // Camera azimuth relative direction
+          // Camera-relative movement vector
           const camAngle = tpCamera.theta;
-          const worldMoveX = moveX * Math.cos(camAngle) + moveZ * Math.sin(camAngle);
-          const worldMoveZ = -moveX * Math.sin(camAngle) + moveZ * Math.cos(camAngle);
+          const worldDirX = normX * Math.cos(camAngle) + normZ * Math.sin(camAngle);
+          const worldDirZ = -normX * Math.sin(camAngle) + normZ * Math.cos(camAngle);
 
-          // Turn character smoothly towards movement direction
-          const targetRot = Math.atan2(worldMoveX, worldMoveZ);
-          let rotDiff = (targetRot - playerRotYRef.current) % (Math.PI * 2);
-          if (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
-          if (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
-          playerRotYRef.current += rotDiff * Math.min(1, delta * 15);
+          const moveSpeed = 6.2; // Smooth exploratory walking speed
+          playerPosRef.current.x += worldDirX * moveSpeed * delta;
+          playerPosRef.current.z += worldDirZ * moveSpeed * delta;
 
-          // Apply move speed
-          const speed = 7.5;
-          playerPosRef.current.x += worldMoveX * speed * delta;
-          playerPosRef.current.z += worldMoveZ * speed * delta;
+          // Smoothly rotate character to face travel direction
+          const targetRotY = Math.atan2(worldDirX, worldDirZ);
+          let diff = (targetRotY - playerRotYRef.current) % (Math.PI * 2);
+          if (diff < -Math.PI) diff += Math.PI * 2;
+          if (diff > Math.PI) diff -= Math.PI * 2;
+          playerRotYRef.current += diff * Math.min(1, delta * 15);
 
           // Sound
           if (isGroundedRef.current) {
@@ -537,7 +640,7 @@ export default function App() {
           isJumpingRef.current = false;
         }
 
-        // Clamp to world radius ~55 units
+        // Clamp to world radius ~54 units
         const distFromCenter = Math.hypot(playerPosRef.current.x, playerPosRef.current.z);
         if (distFromCenter > 54) {
           const ratio = 54 / distFromCenter;
@@ -568,7 +671,8 @@ export default function App() {
             playerPosRef.current,
             playerRotYRef.current,
             isMoving,
-            !isGroundedRef.current
+            !isGroundedRef.current,
+            localRigRef.current?.currentEmote
           );
         }
 
@@ -602,129 +706,213 @@ export default function App() {
         }
       }
 
-      // C. Update World (Flames, Water)
-      worldEnv.update(delta, elapsedTime);
-
-      // D. Update Camera Follow
+      // C. Update Third Person Camera following player target
       tpCamera.update(playerPosRef.current, delta);
 
-      // Render
+      // D. Render Frame
       renderer.render(scene, camera);
-
-      animationFrameId = requestAnimationFrame(tick);
     };
 
-    animationFrameId = requestAnimationFrame(tick);
+    animFrameId = requestAnimationFrame(gameLoop);
 
-    // Cleanup
+    // Cleanup resources on unmount
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      cancelAnimationFrame(animFrameId);
+      window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('mousedown', handleMouseDown);
+      canvasDom.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('wheel', handleWheel);
-      window.removeEventListener('resize', handleResize);
+      canvasDom.removeEventListener('wheel', handleWheel);
+      canvasDom.removeEventListener('touchstart', handleTouchStart);
+      canvasDom.removeEventListener('touchmove', handleTouchMove);
 
-      domCanvas.removeEventListener('touchstart', handleTouchStart);
-      domCanvas.removeEventListener('touchmove', handleTouchMove);
-      domCanvas.removeEventListener('touchend', handleTouchEnd);
-      domCanvas.removeEventListener('touchcancel', handleTouchEnd);
-
-      networkManager.disconnect();
       remoteMgr.clear();
+
+      scene.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const mesh = obj as THREE.Mesh;
+          mesh.geometry?.dispose();
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach((m) => m.dispose());
+          } else {
+            mesh.material?.dispose();
+          }
+        }
+      });
+
       renderer.dispose();
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
+      container.replaceChildren();
     };
-  }, [triggerJump]); // Mounted once, never torn down on join
+  }, []);
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none touch-none">
-      {/* 3D WebGL Canvas Mount Container */}
-      <div
-        ref={containerRef}
-        className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing canvas-container"
-      />
+    <div className="relative w-full h-full overflow-hidden select-none bg-slate-950 font-sans">
+      {/* 3D WebGL Canvas Layer */}
+      <div ref={containerRef} className="absolute inset-0 w-full h-full canvas-container" />
 
-      {/* Top Bar Header (Zone 1: Brand, Zone 2: Single-line context, Zone 3: Status) */}
-      <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between gap-4 sm:gap-8 px-4 sm:px-6 py-3 sm:py-4 pointer-events-none">
-        {/* Zone 1: Wordmark */}
-        <div className="flex items-center gap-2 pointer-events-auto bg-slate-900/80 border border-slate-700/70 rounded-xl px-3 py-1.5 shadow-lg">
-          <div className="w-5 h-5 rounded-lg bg-blue-600 flex items-center justify-center">
-            <Compass className="w-3.5 h-3.5 text-white" />
+      {/* Top Header Bar HUD */}
+      <header className="fixed top-0 left-0 right-0 z-20 px-3 sm:px-6 py-2.5 sm:py-3.5 pointer-events-none">
+        {/* Mobile Minimal Header (md:hidden) */}
+        <div className="flex md:hidden items-center justify-between pointer-events-auto">
+          {/* Mobile Camera View Cycle Button */}
+          <button
+            type="button"
+            onClick={handleCycleCameraPreset}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-900/85 hover:bg-slate-800 border border-slate-700/80 rounded-2xl shadow-xl text-xs font-semibold text-white backdrop-blur-md active:scale-95 transition-all min-h-[44px]"
+            title="카메라 시점 변경"
+          >
+            <Video className="w-4 h-4 text-blue-400" />
+            <span>시점: {cameraPreset === 'close' ? '근접' : cameraPreset === 'normal' ? '기본' : cameraPreset === 'far' ? '원거리' : '탑뷰'}</span>
+          </button>
+
+          {/* Mobile Right Controls: Chat & Quick Menu */}
+          <div className="flex items-center gap-2">
+            {hasEntered && (
+              <button
+                type="button"
+                onClick={() => setIsMobileDrawerOpen(true)}
+                className="relative flex items-center justify-center w-11 h-11 bg-slate-900/85 hover:bg-slate-800 border border-slate-700/80 rounded-2xl shadow-xl text-white backdrop-blur-md active:scale-95 transition-all"
+                title="채팅 열기"
+                aria-label="실시간 채팅 열기"
+              >
+                <MessageSquare className="w-4 h-4 text-blue-400" />
+                {chatMessages.length > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-blue-500 absolute top-2.5 right-2.5 ring-2 ring-slate-900" />
+                )}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="flex items-center justify-center w-11 h-11 bg-slate-900/85 hover:bg-slate-800 border border-slate-700/80 rounded-2xl shadow-xl text-white backdrop-blur-md active:scale-95 transition-all"
+              title="메뉴 열기"
+              aria-label="더보기 메뉴 열기"
+            >
+              <MoreHorizontal className="w-5 h-5 text-slate-200" />
+            </button>
           </div>
-          <span className="hidden sm:inline text-sm font-bold tracking-tight text-white whitespace-nowrap">
-            Meta World
-          </span>
-          <span className="hidden sm:inline text-xs text-slate-400 font-medium">자연 프로토타입</span>
         </div>
 
-        {/* Zone 3: Primary Action & Player status */}
-        <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto">
-          {/* Sound Toggle */}
-          <button
-            onClick={handleToggleMute}
-            className={`p-1.5 rounded-xl border transition-all ${
-              isMuted
-                ? 'bg-red-950/60 border-red-800/60 text-red-400 hover:bg-red-900/60'
-                : 'bg-slate-900/80 border-slate-700/70 text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-            title={isMuted ? '음소거 해제' : '음소거'}
-          >
-            {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-          </button>
+        {/* Desktop Full Header (hidden md:flex) */}
+        <div className="hidden md:flex items-center justify-between pointer-events-none">
+          {/* Zone 1: Camera Preset Quick Switcher */}
+          <div className="flex items-center gap-1 sm:gap-1.5 p-1 bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-700/70 shadow-lg pointer-events-auto">
+            {(['close', 'normal', 'far', 'top'] as CameraPreset[]).map((preset) => (
+              <button
+                key={preset}
+                onClick={() => handleSelectPreset(preset)}
+                className={`px-2.5 py-1 rounded-xl text-xs font-semibold capitalize transition-all ${
+                  cameraPreset === preset
+                    ? 'bg-blue-600 text-white shadow'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                {preset === 'close' ? '근접' : preset === 'normal' ? '기본' : preset === 'far' ? '원거리' : '탑뷰'}
+              </button>
+            ))}
+          </div>
 
-          {/* Online Players Button */}
-          {hasEntered && (
-            <button
-              onClick={() => setIsPlayersModalOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/70 rounded-xl shadow-lg text-[11px] font-medium text-slate-200 transition-colors"
-              title="접속자 목록"
-            >
-              <Users className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">접속자</span>
-              <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-mono font-semibold">
-                {playerList.length}
-              </span>
-            </button>
-          )}
-
-          {/* Controls Help */}
-          <button
-            onClick={() => setIsHelpModalOpen(true)}
-            className="p-1.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/70 rounded-xl text-slate-300 hover:text-white transition-colors"
-            title="조작 안내"
-          >
-            <HelpCircle className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Connection status button */}
-          <button
-            onClick={() => setIsServerModalOpen(true)}
-            className="px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/70 rounded-xl shadow-lg text-[11px] font-mono flex items-center gap-1.5 transition-colors"
-            title="게임 서버 설정 및 연결 확인"
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isConnected ? 'bg-emerald-400' : 'bg-amber-400'
-              }`}
+          {/* Zone 2: Title & Branding */}
+          <div className="flex items-center gap-2 px-3.5 py-1.5 bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-700/70 shadow-lg">
+            <div
+              className="w-3.5 h-3.5 rounded-full shadow-sm"
+              style={{ backgroundColor: selfAppearance.shirtColor }}
             />
-            <span className={isConnected ? 'text-emerald-300' : 'text-amber-300'}>
-              {isConnected ? '온라인' : '연결 대기중'}
+            <span className="text-xs font-bold tracking-wide text-white">
+              Meta World
             </span>
-            <Server className="w-3 h-3 text-slate-400 ml-0.5" />
-          </button>
+            <span className="text-xs text-slate-400 font-medium">자연 프로토타입</span>
+          </div>
+
+          {/* Zone 3: Primary Action & Player status */}
+          <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto">
+            {/* Sound Toggle */}
+            <button
+              onClick={handleToggleMute}
+              className={`p-1.5 rounded-xl border transition-all ${
+                isMuted
+                  ? 'bg-red-950/60 border-red-800/60 text-red-400 hover:bg-red-900/60'
+                  : 'bg-slate-900/80 border-slate-700/70 text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+              title={isMuted ? '음소거 해제' : '음소거'}
+            >
+              {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+            </button>
+
+            {/* In-game Wardrobe Button */}
+            {hasEntered && (
+              <button
+                onClick={() => setIsWardrobeOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-600/80 hover:bg-amber-600 border border-amber-500/70 rounded-xl shadow-lg text-[11px] font-bold text-white transition-all hover:scale-105"
+                title="캐릭터 스타일 및 옷장 변경"
+              >
+                <Shirt className="w-3.5 h-3.5" />
+                <span>옷장</span>
+              </button>
+            )}
+
+            {/* Online Players Button */}
+            {hasEntered && (
+              <button
+                onClick={() => setIsPlayersModalOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/70 rounded-xl shadow-lg text-[11px] font-medium text-slate-200 transition-colors"
+                title="접속자 목록"
+              >
+                <Users className="w-3.5 h-3.5 text-emerald-400" />
+                <span>접속자</span>
+                <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-mono font-semibold">
+                  {playerList.length}
+                </span>
+              </button>
+            )}
+
+            {/* Controls Help */}
+            <button
+              onClick={() => setIsHelpModalOpen(true)}
+              className="p-1.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/70 rounded-xl text-slate-300 hover:text-white transition-colors"
+              title="조작 안내"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Connection status button */}
+            <button
+              onClick={() => setIsServerModalOpen(true)}
+              className="px-2.5 py-1 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/70 rounded-xl shadow-lg text-[11px] font-mono flex items-center gap-1.5 transition-colors"
+              title="게임 서버 설정 및 연결 확인"
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isConnected ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+              <span className={isConnected ? 'text-emerald-300' : 'text-amber-300'}>
+                {isConnected ? '온라인' : '연결 대기중'}
+              </span>
+              <Server className="w-3 h-3 text-slate-400 ml-0.5" />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Mobile On-Screen Virtual Touch Controls */}
-      {hasEntered && isTouchDevice && (
-        <>
+      {/* Floating Emote / Action Bar */}
+      {hasEntered && (
+        <EmoteBar
+          currentEmote={currentEmote}
+          onTriggerEmote={triggerEmote}
+          onOpenWardrobe={() => setIsWardrobeOpen(true)}
+          isChatFocused={isChatFocused}
+        />
+      )}
+
+      {/* Mobile On-Screen Virtual Touch Controls (Always visible on mobile screens < 768px, hidden on desktop screens) */}
+      {hasEntered && (
+        <div className="md:hidden">
           {/* Left: Virtual Joystick */}
-          <div className="fixed bottom-6 left-6 z-30 pointer-events-auto">
+          <div className="fixed bottom-6 left-5 z-30 pointer-events-auto">
             <VirtualJoystick
               onMove={(move) => {
                 touchMoveRef.current = move;
@@ -733,10 +921,10 @@ export default function App() {
           </div>
 
           {/* Right: Touch Jump Button */}
-          <div className="fixed bottom-8 right-6 z-30 pointer-events-auto">
+          <div className="fixed bottom-6 right-5 z-30 pointer-events-auto">
             <TouchJumpButton onJump={triggerJump} />
           </div>
-        </>
+        </div>
       )}
 
       {/* Initial Entry Modal */}
@@ -748,7 +936,7 @@ export default function App() {
         />
       )}
 
-      {/* Real-Time Chat Overlay (Responsive Desktop Card + Mobile Slide Drawer) */}
+      {/* Real-Time Chat Overlay */}
       {hasEntered && (
         <ChatOverlay
           messages={chatMessages}
@@ -760,6 +948,32 @@ export default function App() {
           setIsMobileDrawerOpen={setIsMobileDrawerOpen}
         />
       )}
+
+      {/* Mobile Quick Sheet Menu (Consolidates secondary tools) */}
+      <MobileQuickMenu
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+        onOpenWardrobe={() => setIsWardrobeOpen(true)}
+        onOpenPlayers={() => setIsPlayersModalOpen(true)}
+        onOpenHelp={() => setIsHelpModalOpen(true)}
+        onOpenServer={() => setIsServerModalOpen(true)}
+        isMuted={isMuted}
+        onToggleMute={handleToggleMute}
+        cameraPreset={cameraPreset}
+        onSelectCameraPreset={handleSelectPreset}
+        playerCount={playerList.length}
+        isConnected={isConnected}
+        selfNickname={selfNickname}
+        shirtColor={selfAppearance.shirtColor}
+      />
+
+      {/* In-game Wardrobe / Character Customizer Modal */}
+      <CharacterCustomizerModal
+        isOpen={isWardrobeOpen}
+        onClose={() => setIsWardrobeOpen(false)}
+        currentAppearance={selfAppearance}
+        onApplyAppearance={handleApplyAppearance}
+      />
 
       {/* Online Players Modal */}
       <OnlinePlayersModal

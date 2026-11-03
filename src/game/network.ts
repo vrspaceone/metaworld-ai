@@ -1,11 +1,11 @@
 import { io, Socket } from 'socket.io-client';
-import { ChatMessage, PlayerData, Vector3D } from '../types/game.ts';
+import { CharacterAppearance, CharacterEmote, ChatMessage, PlayerData, Vector3D } from '../types/game.ts';
 
 export class NetworkManager {
   private socket: Socket | null = null;
   public selfId: string | null = null;
   public isConnected: boolean = false;
-  public lastJoinData: { nickname: string; color: string } | null = null;
+  public lastJoinData: { nickname: string; color: string; appearance?: CharacterAppearance } | null = null;
   public currentServerUrl: string = '';
 
   private onWorldInitCallbacks: ((data: { selfId: string; players: PlayerData[]; chatHistory: ChatMessage[] }) => void)[] = [];
@@ -16,7 +16,10 @@ export class NetworkManager {
     rotationY: number;
     isMoving: boolean;
     isJumping: boolean;
+    emote?: CharacterEmote;
   }) => void)[] = [];
+  private onPlayerAppearanceCallbacks: ((data: { id: string; appearance: CharacterAppearance; color: string }) => void)[] = [];
+  private onPlayerEmotedCallbacks: ((data: { id: string; emote: CharacterEmote }) => void)[] = [];
   private onPlayerLeftCallbacks: ((data: { id: string }) => void)[] = [];
   private onChatMessageCallbacks: ((msg: ChatMessage) => void)[] = [];
   private onConnectionChangeCallbacks: ((connected: boolean) => void)[] = [];
@@ -50,7 +53,7 @@ export class NetworkManager {
     this.disconnect();
     this.connect();
     if (this.lastJoinData) {
-      this.joinWorld(this.lastJoinData.nickname, this.lastJoinData.color);
+      this.joinWorld(this.lastJoinData.nickname, this.lastJoinData.color, this.lastJoinData.appearance);
     }
   }
 
@@ -62,20 +65,21 @@ export class NetworkManager {
 
     console.log('[MetaWorld Network] Connecting to Socket.IO server at:', this.currentServerUrl);
 
+    const socketOptions = {
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+      reconnection: true,
+      reconnectionAttempts: 25,
+      reconnectionDelay: 1000,
+      timeout: 20000,
+    };
+
     this.socket = serverUrl
-      ? io(serverUrl, {
-          transports: ['websocket', 'polling'],
-          reconnectionAttempts: 20,
-          reconnectionDelay: 1500,
-        })
-      : io({
-          transports: ['websocket', 'polling'],
-          reconnectionAttempts: 20,
-          reconnectionDelay: 1500,
-        });
+      ? io(serverUrl, socketOptions)
+      : io(socketOptions);
 
     this.socket.on('connect', () => {
-      console.log('[MetaWorld Network] Connected successfully, socket.id:', this.socket?.id);
+      console.log('[MetaWorld Network] Connected successfully, socket.id:', this.socket?.id, 'via:', this.socket?.io.engine.transport.name);
       this.isConnected = true;
       this.notifyConnection(true);
 
@@ -86,6 +90,19 @@ export class NetworkManager {
       }
     });
 
+    this.socket.io.on('reconnect', (attempt: number) => {
+      console.log('[MetaWorld Network] Reconnected on attempt:', attempt);
+      this.isConnected = true;
+      this.notifyConnection(true);
+      if (this.lastJoinData) {
+        this.socket?.emit('player:join', this.lastJoinData);
+      }
+    });
+
+    this.socket.io.engine?.on('upgrade', (transport: { name: string }) => {
+      console.log('[MetaWorld Network] Transport upgraded to:', transport?.name);
+    });
+
     this.socket.on('disconnect', (reason) => {
       console.warn('[MetaWorld Network] Disconnected:', reason);
       this.isConnected = false;
@@ -93,9 +110,11 @@ export class NetworkManager {
     });
 
     this.socket.on('connect_error', (err) => {
-      console.error('[MetaWorld Network] Connection error:', err.message);
-      this.isConnected = false;
-      this.notifyConnection(false);
+      console.warn('[MetaWorld Network] Connection status:', err.message);
+      if (!this.socket?.connected) {
+        this.isConnected = false;
+        this.notifyConnection(false);
+      }
     });
 
     this.socket.on('init:world', (data: { selfId: string; players: PlayerData[]; chatHistory: ChatMessage[] }) => {
@@ -113,6 +132,14 @@ export class NetworkManager {
       this.onPlayerMovedCallbacks.forEach(cb => cb(data));
     });
 
+    this.socket.on('player:appearance_updated', (data: { id: string; appearance: CharacterAppearance; color: string }) => {
+      this.onPlayerAppearanceCallbacks.forEach(cb => cb(data));
+    });
+
+    this.socket.on('player:emoted', (data: { id: string; emote: CharacterEmote }) => {
+      this.onPlayerEmotedCallbacks.forEach(cb => cb(data));
+    });
+
     this.socket.on('player:left', (data) => {
       console.log('[MetaWorld Network] player:left received:', data.id);
       this.onPlayerLeftCallbacks.forEach(cb => cb(data));
@@ -123,8 +150,8 @@ export class NetworkManager {
     });
   }
 
-  public joinWorld(nickname: string, color: string) {
-    this.lastJoinData = { nickname, color };
+  public joinWorld(nickname: string, color: string, appearance?: CharacterAppearance) {
+    this.lastJoinData = { nickname, color, appearance };
 
     if (!this.socket) {
       this.connect();
@@ -138,7 +165,30 @@ export class NetworkManager {
     }
   }
 
-  public sendMovement(pos: Vector3D, rotationY: number, isMoving: boolean, isJumping: boolean, force: boolean = false) {
+  public sendAppearance(appearance: CharacterAppearance) {
+    if (this.lastJoinData) {
+      this.lastJoinData.appearance = appearance;
+      if (appearance.shirtColor) {
+        this.lastJoinData.color = appearance.shirtColor;
+      }
+    }
+    if (!this.socket || !this.isConnected) return;
+    this.socket.emit('player:appearance', { appearance });
+  }
+
+  public sendEmote(emote: CharacterEmote) {
+    if (!this.socket || !this.isConnected) return;
+    this.socket.emit('player:emote', { emote });
+  }
+
+  public sendMovement(
+    pos: Vector3D,
+    rotationY: number,
+    isMoving: boolean,
+    isJumping: boolean,
+    emote?: CharacterEmote,
+    force: boolean = false
+  ) {
     if (!this.socket || !this.isConnected) return;
     const now = performance.now();
     if (!force && now - this.lastMoveSendTime < this.moveIntervalMs) {
@@ -155,6 +205,7 @@ export class NetworkManager {
       rotationY: Math.round(rotationY * 1000) / 1000,
       isMoving,
       isJumping,
+      emote,
     });
   }
 
@@ -177,8 +228,17 @@ export class NetworkManager {
     rotationY: number;
     isMoving: boolean;
     isJumping: boolean;
+    emote?: CharacterEmote;
   }) => void) {
     this.onPlayerMovedCallbacks.push(cb);
+  }
+
+  public onPlayerAppearanceUpdated(cb: (data: { id: string; appearance: CharacterAppearance; color: string }) => void) {
+    this.onPlayerAppearanceCallbacks.push(cb);
+  }
+
+  public onPlayerEmoted(cb: (data: { id: string; emote: CharacterEmote }) => void) {
+    this.onPlayerEmotedCallbacks.push(cb);
   }
 
   public onPlayerLeft(cb: (data: { id: string }) => void) {

@@ -70,6 +70,20 @@ export const ControlsHelpModal: React.FC<ControlsHelpModalProps> = ({ isOpen, on
             </div>
           </div>
 
+          {/* Emotes & Wardrobe Guide */}
+          <div className="flex items-start gap-3 p-3 bg-amber-950/30 rounded-xl border border-amber-800/40">
+            <div className="p-2 bg-amber-500/20 text-amber-400 rounded-lg shrink-0">
+              <span className="text-base">✨</span>
+            </div>
+            <div>
+              <div className="font-semibold text-slate-200 mb-1">캐릭터 감정표현 & 옷장 커스텀</div>
+              <div className="text-slate-400 space-y-1">
+                <div>• <code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">1</code> 인사(Wave), <code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">2</code> 댄스(Dance), <code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">3</code> 경례(Salute), <code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">4</code> 환호(Cheer), <code className="bg-slate-700 text-amber-300 px-1 py-0.5 rounded font-mono">5</code> 박수(Clap)</div>
+                <div>• 화면 하단 감정표현 툴바의 <strong>[옷장]</strong> 버튼을 누르면 언제든지 사파리 모자, 동물 귀, 날개, 의상 및 색상을 실시간 변경할 수 있습니다.</div>
+              </div>
+            </div>
+          </div>
+
           {/* Chat Guide */}
           <div className="flex items-start gap-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700/50">
             <div className="p-2 bg-purple-500/20 text-purple-400 rounded-lg shrink-0">

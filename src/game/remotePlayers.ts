@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PlayerData, Vector3D } from '../types/game.ts';
+import { CharacterAppearance, CharacterEmote, PlayerData, Vector3D } from '../types/game.ts';
 import { CharacterRig, animateCharacterRig, createCharacter } from './character.ts';
 import { createNameplateSprite, createSpeechBubbleSprite } from './nameplate.ts';
 
@@ -27,9 +27,12 @@ export class RemotePlayersManager {
       this.removePlayer(player.id);
     }
 
-    const rig = createCharacter(player.color);
+    const rig = createCharacter(player.appearance || player.color);
     rig.root.position.set(player.position.x, player.position.y, player.position.z);
     rig.root.rotation.y = player.rotationY;
+    if (player.emote) {
+      rig.currentEmote = player.emote;
+    }
 
     // Attach native 3D Billboard Nameplate directly to character
     const nameplate = createNameplateSprite(player.nickname, player.color, false);
@@ -57,7 +60,8 @@ export class RemotePlayersManager {
     pos: Vector3D,
     rotY: number,
     isMoving: boolean,
-    isJumping: boolean
+    isJumping: boolean,
+    emote?: CharacterEmote
   ) {
     const instance = this.players.get(id);
     if (!instance) return;
@@ -66,6 +70,71 @@ export class RemotePlayersManager {
     instance.targetRotY = rotY;
     instance.isMoving = isMoving;
     instance.isJumping = isJumping;
+    if (emote !== undefined && emote !== instance.rig.currentEmote) {
+      instance.rig.currentEmote = emote;
+      instance.rig.emoteTime = 0;
+      instance.data.emote = emote;
+    }
+  }
+
+  public updatePlayerAppearance(id: string, appearance: CharacterAppearance) {
+    const instance = this.players.get(id);
+    if (!instance) return;
+
+    const pos = instance.rig.root.position.clone();
+    const rotY = instance.rig.root.rotation.y;
+    const nameplate = instance.rig.nameplateSprite;
+    const bubble = instance.rig.speechBubbleSprite;
+    const bubbleTimer = instance.rig.speechBubbleTimer;
+
+    if (nameplate) instance.rig.root.remove(nameplate);
+    if (bubble) instance.rig.root.remove(bubble);
+
+    this.scene.remove(instance.rig.root);
+
+    // Dispose old meshes
+    instance.rig.root.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        mesh.geometry?.dispose();
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((m) => m.dispose());
+        } else {
+          mesh.material?.dispose();
+        }
+      }
+    });
+
+    const newRig = createCharacter(appearance);
+    newRig.root.position.copy(pos);
+    newRig.root.rotation.y = rotY;
+    newRig.currentEmote = instance.rig.currentEmote;
+    newRig.emoteTime = instance.rig.emoteTime;
+
+    if (nameplate) {
+      newRig.nameplateSprite = nameplate;
+      newRig.root.add(nameplate);
+    }
+    if (bubble) {
+      newRig.speechBubbleSprite = bubble;
+      newRig.speechBubbleTimer = bubbleTimer;
+      newRig.root.add(bubble);
+    }
+
+    this.scene.add(newRig.root);
+    instance.rig = newRig;
+    instance.data.appearance = appearance;
+    if (appearance.shirtColor) {
+      instance.data.color = appearance.shirtColor;
+    }
+  }
+
+  public setPlayerEmote(id: string, emote: CharacterEmote) {
+    const instance = this.players.get(id);
+    if (!instance) return;
+    instance.rig.currentEmote = emote;
+    instance.rig.emoteTime = 0;
+    instance.data.emote = emote;
   }
 
   public setSpeechBubble(id: string, text: string) {
@@ -83,6 +152,7 @@ export class RemotePlayersManager {
     const bubble = createSpeechBubbleSprite(text);
     instance.rig.speechBubbleSprite = bubble;
     instance.rig.speechBubbleTimer = 5.0; // 5 seconds
+    bubble.position.y = 2.45;
     instance.rig.root.add(bubble);
   }
 

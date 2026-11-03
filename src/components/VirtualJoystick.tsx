@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState } from 'react';
 
 interface VirtualJoystickProps {
   onMove: (move: { x: number; z: number }) => void;
@@ -9,45 +9,9 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({ onMove, classN
   const baseRef = useRef<HTMLDivElement>(null);
   const [knobPos, setKnobPos] = useState({ x: 0, y: 0 });
   const [isActive, setIsActive] = useState(false);
-  const activeTouchIdRef = useRef<number | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
 
   const maxRadius = 40; // Max movement radius in pixels
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (activeTouchIdRef.current !== null) return;
-    const touch = e.changedTouches[0];
-    activeTouchIdRef.current = touch.identifier;
-    setIsActive(true);
-    updateKnob(touch.clientX, touch.clientY);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (activeTouchIdRef.current === null) return;
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      const touch = e.changedTouches[i];
-      if (touch.identifier === activeTouchIdRef.current) {
-        updateKnob(touch.clientX, touch.clientY);
-        break;
-      }
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (activeTouchIdRef.current === null) return;
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      if (e.changedTouches[i].identifier === activeTouchIdRef.current) {
-        resetJoystick();
-        break;
-      }
-    }
-  };
-
-  const resetJoystick = () => {
-    activeTouchIdRef.current = null;
-    setIsActive(false);
-    setKnobPos({ x: 0, y: 0 });
-    onMove({ x: 0, z: 0 });
-  };
 
   const updateKnob = (clientX: number, clientY: number) => {
     if (!baseRef.current) return;
@@ -85,37 +49,66 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({ onMove, classN
     });
   };
 
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointerIdRef.current !== null) return;
+    activePointerIdRef.current = e.pointerId;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    setIsActive(true);
+    updateKnob(e.clientX, e.clientY);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointerIdRef.current !== e.pointerId) return;
+    updateKnob(e.clientX, e.clientY);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointerIdRef.current !== e.pointerId) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    activePointerIdRef.current = null;
+    setIsActive(false);
+    setKnobPos({ x: 0, y: 0 });
+    onMove({ x: 0, z: 0 });
+  };
+
   return (
     <div
       ref={baseRef}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={resetJoystick}
-      className={`relative w-28 h-28 rounded-full bg-slate-900/60 border-2 ${
-        isActive ? 'border-blue-400 bg-slate-900/80 shadow-lg' : 'border-slate-600/70'
-      } backdrop-blur-xs flex items-center justify-center touch-control select-none z-30 transition-colors ${className}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      className={`relative w-28 h-28 rounded-full bg-slate-900/75 border-2 ${
+        isActive ? 'border-blue-400 bg-slate-900/90 shadow-lg shadow-blue-500/20' : 'border-slate-600/80'
+      } backdrop-blur-md flex items-center justify-center touch-none select-none z-30 transition-colors ${className}`}
       style={{ touchAction: 'none' }}
     >
       {/* Direction Cross Markings */}
-      <div className="absolute w-1 h-3 bg-slate-500/40 top-1 rounded-full" />
-      <div className="absolute w-1 h-3 bg-slate-500/40 bottom-1 rounded-full" />
-      <div className="absolute h-1 w-3 bg-slate-500/40 left-1 rounded-full" />
-      <div className="absolute h-1 w-3 bg-slate-500/40 right-1 rounded-full" />
+      <div className="absolute w-1 h-3 bg-slate-500/50 top-1.5 rounded-full pointer-events-none" />
+      <div className="absolute w-1 h-3 bg-slate-500/50 bottom-1.5 rounded-full pointer-events-none" />
+      <div className="absolute h-1 w-3 bg-slate-500/50 left-1.5 rounded-full pointer-events-none" />
+      <div className="absolute h-1 w-3 bg-slate-500/50 right-1.5 rounded-full pointer-events-none" />
 
       {/* Movable Thumb Knob */}
       <div
-        className={`w-12 h-12 rounded-full border-2 transition-transform duration-75 shadow-md flex items-center justify-center ${
+        className={`w-12 h-12 rounded-full border-2 transition-transform duration-75 shadow-lg flex items-center justify-center pointer-events-none ${
           isActive
             ? 'bg-blue-500 border-white scale-105'
-            : 'bg-slate-700/90 border-slate-400/80'
+            : 'bg-slate-700/95 border-slate-300/80'
         }`}
         style={{
           transform: `translate(${knobPos.x}px, ${knobPos.y}px)`,
-          touchAction: 'none',
         }}
       >
-        <div className="w-3.5 h-3.5 rounded-full bg-white/40" />
+        <div className="w-3.5 h-3.5 rounded-full bg-white/60" />
       </div>
     </div>
   );
@@ -129,39 +122,39 @@ interface TouchJumpButtonProps {
 export const TouchJumpButton: React.FC<TouchJumpButtonProps> = ({ onJump, className = '' }) => {
   const [isPressed, setIsPressed] = useState(false);
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.preventDefault();
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     setIsPressed(true);
     onJump();
   };
 
-  const handleTouchEnd = () => {
+  const handlePointerUp = () => {
     setIsPressed(false);
   };
 
   return (
     <button
       type="button"
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={handleTouchEnd}
-      className={`w-16 h-16 rounded-full border-2 flex flex-col items-center justify-center shadow-xl active:scale-95 transition-all touch-control select-none z-30 font-bold text-xs ${
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      className={`w-16 h-16 rounded-full border-2 flex flex-col items-center justify-center shadow-xl active:scale-95 transition-all touch-none select-none z-30 font-bold text-xs ${
         isPressed
-          ? 'bg-emerald-500 border-white text-white scale-95 shadow-emerald-500/40'
-          : 'bg-slate-900/80 border-slate-600/80 text-slate-200'
+          ? 'bg-emerald-500 border-white text-white scale-95 shadow-emerald-500/50'
+          : 'bg-slate-900/85 border-slate-600/80 text-slate-200 backdrop-blur-md'
       } ${className}`}
       style={{ touchAction: 'none' }}
       title="점프 (Jump)"
+      aria-label="점프"
     >
       <svg
-        className="w-5 h-5 mb-0.5"
+        className="w-5 h-5 mb-0.5 pointer-events-none"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
       >
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
       </svg>
-      <span className="text-[10px] tracking-wider uppercase font-mono">JUMP</span>
+      <span className="text-[10px] tracking-wider uppercase font-mono pointer-events-none">JUMP</span>
     </button>
   );
 };
