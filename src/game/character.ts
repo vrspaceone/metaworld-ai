@@ -10,6 +10,9 @@ export interface CharacterRig {
   rightLeg: THREE.Group;
   backpack: THREE.Mesh;
   animTime: number;
+  nameplateSprite?: THREE.Sprite;
+  speechBubbleSprite?: THREE.Sprite;
+  speechBubbleTimer?: number;
 }
 
 /**

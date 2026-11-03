@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PlayerData, Vector3D } from '../types/game.ts';
 import { CharacterRig, animateCharacterRig, createCharacter } from './character.ts';
+import { createNameplateSprite, createSpeechBubbleSprite } from './nameplate.ts';
 
 export interface RemotePlayerInstance {
   data: PlayerData;
@@ -11,8 +12,6 @@ export interface RemotePlayerInstance {
   targetRotY: number;
   isMoving: boolean;
   isJumping: boolean;
-  activeSpeechBubble: string | null;
-  speechBubbleTimer: number;
 }
 
 export class RemotePlayersManager {
@@ -32,6 +31,11 @@ export class RemotePlayersManager {
     rig.root.position.set(player.position.x, player.position.y, player.position.z);
     rig.root.rotation.y = player.rotationY;
 
+    // Attach native 3D Billboard Nameplate directly to character
+    const nameplate = createNameplateSprite(player.nickname, player.color, false);
+    rig.nameplateSprite = nameplate;
+    rig.root.add(nameplate);
+
     this.scene.add(rig.root);
 
     const instance: RemotePlayerInstance = {
@@ -43,8 +47,6 @@ export class RemotePlayersManager {
       targetRotY: player.rotationY,
       isMoving: player.isMoving,
       isJumping: player.isJumping,
-      activeSpeechBubble: null,
-      speechBubbleTimer: 0,
     };
 
     this.players.set(player.id, instance);
@@ -69,13 +71,33 @@ export class RemotePlayersManager {
   public setSpeechBubble(id: string, text: string) {
     const instance = this.players.get(id);
     if (!instance) return;
-    instance.activeSpeechBubble = text;
-    instance.speechBubbleTimer = 5.0; // Show for 5 seconds
+
+    // Remove existing bubble if any
+    if (instance.rig.speechBubbleSprite) {
+      instance.rig.root.remove(instance.rig.speechBubbleSprite);
+      instance.rig.speechBubbleSprite.material.dispose();
+      instance.rig.speechBubbleSprite = undefined;
+    }
+
+    // Attach fresh 3D speech bubble
+    const bubble = createSpeechBubbleSprite(text);
+    instance.rig.speechBubbleSprite = bubble;
+    instance.rig.speechBubbleTimer = 5.0; // 5 seconds
+    instance.rig.root.add(bubble);
   }
 
   public removePlayer(id: string) {
     const instance = this.players.get(id);
     if (!instance) return;
+
+    if (instance.rig.nameplateSprite) {
+      instance.rig.root.remove(instance.rig.nameplateSprite);
+      instance.rig.nameplateSprite.material.dispose();
+    }
+    if (instance.rig.speechBubbleSprite) {
+      instance.rig.root.remove(instance.rig.speechBubbleSprite);
+      instance.rig.speechBubbleSprite.material.dispose();
+    }
 
     this.scene.remove(instance.rig.root);
 
@@ -115,10 +137,12 @@ export class RemotePlayersManager {
       animateCharacterRig(instance.rig, delta, instance.isMoving, instance.isJumping);
 
       // Update speech bubble timeout
-      if (instance.activeSpeechBubble) {
-        instance.speechBubbleTimer -= delta;
-        if (instance.speechBubbleTimer <= 0) {
-          instance.activeSpeechBubble = null;
+      if (instance.rig.speechBubbleSprite && instance.rig.speechBubbleTimer !== undefined) {
+        instance.rig.speechBubbleTimer -= delta;
+        if (instance.rig.speechBubbleTimer <= 0) {
+          instance.rig.root.remove(instance.rig.speechBubbleSprite);
+          instance.rig.speechBubbleSprite.material.dispose();
+          instance.rig.speechBubbleSprite = undefined;
         }
       }
     });

@@ -18,7 +18,7 @@ import { ChatOverlay } from './components/ChatOverlay.tsx';
 import { BottomDock } from './components/BottomDock.tsx';
 import { OnlinePlayersModal } from './components/OnlinePlayersModal.tsx';
 import { ControlsHelpModal } from './components/ControlsHelpModal.tsx';
-import { BillboardLabels } from './components/BillboardLabels.tsx';
+import { createNameplateSprite, createSpeechBubbleSprite } from './game/nameplate.ts';
 import { ServerConfigModal } from './components/ServerConfigModal.tsx';
 import { VirtualJoystick, TouchJumpButton } from './components/VirtualJoystick.tsx';
 import { Compass, Server } from 'lucide-react';
@@ -105,14 +105,25 @@ export default function App() {
     setSelfColor(color);
     setHasEntered(true);
 
-    // Initialize local character rig with chosen color
+    // Initialize local character rig with chosen color and 3D overhead nameplate
     if (localRigRef.current) {
       const scene = localRigRef.current.root.parent as THREE.Scene | null;
       if (scene) {
+        if (localRigRef.current.nameplateSprite) {
+          localRigRef.current.root.remove(localRigRef.current.nameplateSprite);
+          localRigRef.current.nameplateSprite.material.dispose();
+        }
+        if (localRigRef.current.speechBubbleSprite) {
+          localRigRef.current.root.remove(localRigRef.current.speechBubbleSprite);
+          localRigRef.current.speechBubbleSprite.material.dispose();
+        }
         scene.remove(localRigRef.current.root);
         const newRig = createCharacter(color);
         newRig.root.position.copy(playerPosRef.current);
         newRig.root.rotation.y = playerRotYRef.current;
+        const nameplate = createNameplateSprite(nickname, color, true);
+        newRig.nameplateSprite = nameplate;
+        newRig.root.add(nameplate);
         scene.add(newRig.root);
         localRigRef.current = newRig;
       }
@@ -126,8 +137,16 @@ export default function App() {
   // Handle sending chat
   const handleSendMessage = useCallback((text: string) => {
     networkManager.sendChat(text);
-    setSelfSpeechBubble(text);
-    selfBubbleTimerRef.current = 5.0; // 5 seconds
+    if (localRigRef.current) {
+      if (localRigRef.current.speechBubbleSprite) {
+        localRigRef.current.root.remove(localRigRef.current.speechBubbleSprite);
+        localRigRef.current.speechBubbleSprite.material.dispose();
+      }
+      const bubble = createSpeechBubbleSprite(text);
+      localRigRef.current.speechBubbleSprite = bubble;
+      localRigRef.current.speechBubbleTimer = 5.0;
+      localRigRef.current.root.add(bubble);
+    }
     soundEngine.playChatChime();
   }, []);
 
@@ -232,6 +251,9 @@ export default function App() {
     // 5. Build Local Player Character Rig
     const localRig = createCharacter(selfColor);
     localRig.root.position.copy(playerPosRef.current);
+    const localNameplate = createNameplateSprite(selfNickname, selfColor, true);
+    localRig.nameplateSprite = localNameplate;
+    localRig.root.add(localNameplate);
     scene.add(localRig.root);
     localRigRef.current = localRig;
 
@@ -551,11 +573,13 @@ export default function App() {
           );
         }
 
-        // Update speech bubble timeout
-        if (selfBubbleTimerRef.current > 0) {
-          selfBubbleTimerRef.current -= delta;
-          if (selfBubbleTimerRef.current <= 0) {
-            setSelfSpeechBubble(null);
+        // Update local 3D speech bubble timeout
+        if (localRigRef.current?.speechBubbleSprite && localRigRef.current.speechBubbleTimer !== undefined) {
+          localRigRef.current.speechBubbleTimer -= delta;
+          if (localRigRef.current.speechBubbleTimer <= 0) {
+            localRigRef.current.root.remove(localRigRef.current.speechBubbleSprite);
+            localRigRef.current.speechBubbleSprite.material.dispose();
+            localRigRef.current.speechBubbleSprite = undefined;
           }
         }
 
@@ -625,19 +649,6 @@ export default function App() {
         ref={containerRef}
         className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing canvas-container"
       />
-
-      {/* Floating 3D -> 2D Billboard Labels (Nicknames & Speech Bubbles) */}
-      {hasEntered && (
-        <BillboardLabels
-          camera={cameraRef.current}
-          viewportSize={viewportSize}
-          selfNickname={selfNickname}
-          selfColor={selfColor}
-          selfPosition={playerPosRef.current}
-          selfSpeechBubble={selfSpeechBubble}
-          remotePlayers={activeRemotePlayers}
-        />
-      )}
 
       {/* Top Bar Header (Zone 1: Brand, Zone 2: Single-line context, Zone 3: Status) */}
       <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between gap-4 sm:gap-8 px-4 sm:px-6 py-3 sm:py-4 pointer-events-none">
