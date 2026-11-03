@@ -145,7 +145,7 @@ export function createCharacter(shirtColorHex: string = '#3b82f6'): CharacterRig
   headGroup.add(headMesh);
 
   // Stylized Hair / Cap
-  const hairGeo = new THREE.BoxGeometry(0.35, 0.16, 0.34);
+  const hairGeo = new THREE.BoxGeometry(0.35, 0.16, 0.35);
   const hairMesh = new THREE.Mesh(hairGeo, hairMat);
   hairMesh.position.set(0, 0.35, -0.02);
   hairMesh.castShadow = true;
