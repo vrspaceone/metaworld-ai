@@ -15,7 +15,7 @@ import {
   CHARACTER_PRESETS,
   DEFAULT_APPEARANCE,
 } from './game/character.ts';
-import { buildNatureWorld, getTerrainHeight, WorldEnvironment } from './game/world.ts';
+import { buildNatureWorld, getPlanetRadius, PLANET_RADIUS, VOLCANO_1_DIR, WorldEnvironment } from './game/world.ts';
 import { ThirdPersonCamera } from './game/camera.ts';
 import { networkManager } from './game/network.ts';
 import { RemotePlayerInstance, RemotePlayersManager } from './game/remotePlayers.ts';
@@ -61,7 +61,7 @@ export default function App() {
   // Game data state for 2D overlays
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [playerList, setPlayerList] = useState<PlayerData[]>([]);
-  const [selfPosState, setSelfPosState] = useState<Vector3D>({ x: 0, y: 0, z: 5.5 });
+  const [selfPosState, setSelfPosState] = useState<Vector3D>({ x: 0, y: PLANET_RADIUS, z: 0 });
   const [activeRemotePlayers, setActiveRemotePlayers] = useState<RemotePlayerInstance[]>([]);
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({
     width: typeof window !== 'undefined' ? window.innerWidth : 1280,
@@ -75,10 +75,11 @@ export default function App() {
   const remoteMgrRef = useRef<RemotePlayersManager | null>(null);
   const worldEnvRef = useRef<WorldEnvironment | null>(null);
 
-  // Player Kinematics
-  const playerPosRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 5.5));
-  const playerVelocityRef = useRef<THREE.Vector3>(new THREE.Vector3());
-  const playerRotYRef = useRef<number>(Math.PI);
+  // Player Kinematics (Spherical Planet Gravity)
+  const playerPosRef = useRef<THREE.Vector3>(new THREE.Vector3(0, PLANET_RADIUS, 0));
+  const characterForwardRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 1));
+  const radialVelocityRef = useRef<number>(0);
+  const playerRotYRef = useRef<number>(0);
   const isGroundedRef = useRef<boolean>(true);
   const isMovingRef = useRef<boolean>(false);
   const isJumpingRef = useRef<boolean>(false);
@@ -249,10 +250,10 @@ export default function App() {
     soundEngine.setMuted(nextMuted);
   };
 
-  // Handle jump trigger for touch and key
+  // Handle jump trigger for touch and key (radial jump away from planet center)
   const triggerJump = useCallback(() => {
     if (isGroundedRef.current) {
-      playerVelocityRef.current.y = 8.8; // Jump impulse
+      radialVelocityRef.current = 8.5; // Radial jump impulse
       isGroundedRef.current = false;
       isJumpingRef.current = true;
       if (localRigRef.current && localRigRef.current.currentEmote !== 'none') {
@@ -279,10 +280,10 @@ export default function App() {
       return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
     })();
 
-    // 1. Scene & Environment
+    // 1. Scene & Cosmic Environment
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#bae6fd'); // Soft sky blue
-    scene.fog = new THREE.FogExp2('#bae6fd', 0.016); // Horizon fog match
+    scene.background = new THREE.Color('#070817'); // Deep cosmic navy-indigo
+    scene.fog = new THREE.FogExp2('#070817', 0.007); // Starlight cosmic depth
 
     // 2. Camera
     const camera = new THREE.PerspectiveCamera(
@@ -320,6 +321,10 @@ export default function App() {
     // 5. Build Local Player Character Rig
     const localRig = createCharacter(selfAppearance);
     localRig.root.position.copy(playerPosRef.current);
+    const initialUp = playerPosRef.current.clone().normalize();
+    if (initialUp.lengthSq() > 0.1) {
+      localRig.root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), initialUp);
+    }
     const localNameplate = createNameplateSprite(selfNickname, selfColor, true);
     localRig.nameplateSprite = localNameplate;
     localRig.root.add(localNameplate);
@@ -600,58 +605,81 @@ export default function App() {
           setCurrentEmote('none');
         }
 
+        // Surface normal pointing away from planet center (0, 0, 0)
+        const normal = playerPosRef.current.clone().normalize();
+        if (normal.lengthSq() < 0.1) normal.set(0, 1, 0);
+
+        // Get continuous tangent movement vectors relative to camera view
+        const { up, forward: camForward, right: camRight } = tpCamera.getMovementVectors(playerPosRef.current);
+
         if (isMoving) {
           const normX = moveX / inputLen;
           const normZ = moveZ / inputLen;
 
-          // Camera-relative movement vector
-          const camAngle = tpCamera.theta;
-          const worldDirX = normX * Math.cos(camAngle) + normZ * Math.sin(camAngle);
-          const worldDirZ = -normX * Math.sin(camAngle) + normZ * Math.cos(camAngle);
+          // Continuous 3D vector along sphere tangent plane:
+          // -normZ moves forward (into camera view), normX moves right
+          const worldMoveDir = new THREE.Vector3()
+            .addScaledVector(camForward, -normZ)
+            .addScaledVector(camRight, normX)
+            .normalize();
 
-          const moveSpeed = 6.2; // Smooth exploratory walking speed
-          playerPosRef.current.x += worldDirX * moveSpeed * delta;
-          playerPosRef.current.z += worldDirZ * moveSpeed * delta;
+          // Great-circle rotation around the spherical asteroid!
+          const rotAxis = new THREE.Vector3().crossVectors(up, worldMoveDir).normalize();
+          const moveSpeed = 5.6; // meters per second
+          const angularSpeed = moveSpeed / PLANET_RADIUS; // radians per second
+          const stepAngle = angularSpeed * delta;
 
-          // Smoothly rotate character to face travel direction
-          const targetRotY = Math.atan2(worldDirX, worldDirZ);
-          let diff = (targetRotY - playerRotYRef.current) % (Math.PI * 2);
-          if (diff < -Math.PI) diff += Math.PI * 2;
-          if (diff > Math.PI) diff -= Math.PI * 2;
-          playerRotYRef.current += diff * Math.min(1, delta * 15);
+          // Rotate player position along the great circle on the sphere
+          playerPosRef.current.applyAxisAngle(rotAxis, stepAngle);
 
-          // Sound
+          // Smoothly steer character forward orientation vector towards movement direction
+          characterForwardRef.current.lerp(worldMoveDir, Math.min(1, delta * 18)).normalize();
+
+          // Compute y rotation relative to world for remote networking
+          playerRotYRef.current = Math.atan2(characterForwardRef.current.x, characterForwardRef.current.z);
+
           if (isGroundedRef.current) {
             soundEngine.playStep();
           }
         }
 
-        // Gravity & Jump Physics
-        const gravity = 22.0;
-        playerVelocityRef.current.y -= gravity * delta;
-        playerPosRef.current.y += playerVelocityRef.current.y * delta;
+        // Spherical Radial Gravity & Jump
+        let currentRadius = playerPosRef.current.length();
+        const surfaceRadius = getPlanetRadius(playerPosRef.current);
 
-        // Ground Height Check
-        const groundY = getTerrainHeight(playerPosRef.current.x, playerPosRef.current.z);
-        if (playerPosRef.current.y <= groundY) {
-          playerPosRef.current.y = groundY;
-          playerVelocityRef.current.y = 0;
+        const gravity = 22.0;
+        radialVelocityRef.current -= gravity * delta;
+        currentRadius += radialVelocityRef.current * delta;
+
+        if (currentRadius <= surfaceRadius) {
+          currentRadius = surfaceRadius;
+          radialVelocityRef.current = 0;
           isGroundedRef.current = true;
           isJumpingRef.current = false;
         }
 
-        // Clamp to world radius ~54 units
-        const distFromCenter = Math.hypot(playerPosRef.current.x, playerPosRef.current.z);
-        if (distFromCenter > 54) {
-          const ratio = 54 / distFromCenter;
-          playerPosRef.current.x *= ratio;
-          playerPosRef.current.z *= ratio;
-        }
+        // Apply radial distance to player position vector
+        const currentDir = playerPosRef.current.clone().normalize();
+        playerPosRef.current.copy(currentDir).multiplyScalar(currentRadius);
 
-        // Update local character rig
+        // Update local character rig orientation on the sphere!
         if (localRigRef.current) {
           localRigRef.current.root.position.copy(playerPosRef.current);
-          localRigRef.current.root.rotation.y = playerRotYRef.current;
+
+          // Re-orthogonalize character forward against the current normal
+          characterForwardRef.current
+            .sub(currentDir.clone().multiplyScalar(characterForwardRef.current.dot(currentDir)))
+            .normalize();
+          if (characterForwardRef.current.lengthSq() < 0.01) {
+            characterForwardRef.current.copy(camForward);
+          }
+
+          const charRight = new THREE.Vector3().crossVectors(currentDir, characterForwardRef.current).normalize();
+          const charForward = new THREE.Vector3().crossVectors(charRight, currentDir).normalize();
+
+          const rotMatrix = new THREE.Matrix4().makeBasis(charRight, currentDir, charForward);
+          localRigRef.current.root.quaternion.setFromRotationMatrix(rotMatrix);
+
           animateCharacterRig(
             localRigRef.current,
             delta,
@@ -660,8 +688,10 @@ export default function App() {
           );
         }
 
-        // Campfire audio proximity
-        soundEngine.updateCampfireProximity(distFromCenter);
+        // Volcano audio proximity
+        const volcanoPos = VOLCANO_1_DIR.clone().multiplyScalar(PLANET_RADIUS);
+        const distToVolcano = playerPosRef.current.distanceTo(volcanoPos);
+        soundEngine.updateCampfireProximity(distToVolcano);
 
         // Network replication tick (every ~40ms)
         syncTickAccumulator += delta;
@@ -822,9 +852,9 @@ export default function App() {
               style={{ backgroundColor: selfAppearance.shirtColor }}
             />
             <span className="text-xs font-bold tracking-wide text-white">
-              Meta World
+              소행성 B612
             </span>
-            <span className="text-xs text-slate-400 font-medium">자연 프로토타입</span>
+            <span className="text-xs text-amber-300/80 font-medium">어린 왕자의 별</span>
           </div>
 
           {/* Zone 3: Primary Action & Player status */}

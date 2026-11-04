@@ -108,7 +108,7 @@ export const ChatOverlay: React.FC<ChatOverlayProps> = ({
 
             {/* Quick Reaction Pills */}
             <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-800/50 border-t border-slate-800 overflow-x-auto custom-scrollbar">
-              {['👋 안녕!', '🔥 모닥불', '🌲 자연 좋다', '✨ 최고', '🏃 같이 가요'].map((reaction) => (
+              {['🌹 장미 예쁘다', '🌅 일몰 보자', '🌋 화산이다!', '✨ 별빛 최고', '👋 안녕!'].map((reaction) => (
                 <button
                   key={reaction}
                   type="button"
@@ -210,7 +210,7 @@ export const ChatOverlay: React.FC<ChatOverlayProps> = ({
             {/* Quick Reaction Buttons */}
             <div className="flex items-center gap-1 px-3 py-1.5 bg-slate-800/50 border-t border-slate-700/40 text-xs">
               <span className="text-[10px] text-slate-400 mr-1">빠른 반응:</span>
-              {['👋 안녕!', '🔥 모닥불', '🌲 자연 좋다', '✨ 최고', '🏃 같이 가요'].map((reaction) => (
+              {['🌹 장미 예쁘다', '🌅 일몰 보자', '🌋 화산이다!', '✨ 별빛 최고', '👋 안녕!'].map((reaction) => (
                 <button
                   key={reaction}
                   type="button"

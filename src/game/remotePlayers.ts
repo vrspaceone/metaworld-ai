@@ -29,7 +29,10 @@ export class RemotePlayersManager {
 
     const rig = createCharacter(player.appearance || player.color);
     rig.root.position.set(player.position.x, player.position.y, player.position.z);
-    rig.root.rotation.y = player.rotationY;
+    const initialUp = new THREE.Vector3(player.position.x, player.position.y, player.position.z).normalize();
+    if (initialUp.lengthSq() > 0.01) {
+      rig.root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), initialUp);
+    }
     if (player.emote) {
       rig.currentEmote = player.emote;
     }
@@ -201,7 +204,24 @@ export class RemotePlayersManager {
       instance.currentRotY += diff * Math.min(1, delta * 12);
 
       instance.rig.root.position.copy(instance.currentPos);
-      instance.rig.root.rotation.y = instance.currentRotY;
+
+      // Orient remote player rig perpendicular to asteroid surface
+      const up = instance.currentPos.clone().normalize();
+      if (up.lengthSq() > 0.01) {
+        const ref = Math.abs(up.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+        const east = new THREE.Vector3().crossVectors(ref, up).normalize();
+        const north = new THREE.Vector3().crossVectors(up, east).normalize();
+
+        const forward = new THREE.Vector3()
+          .addScaledVector(east, Math.sin(instance.currentRotY))
+          .addScaledVector(north, Math.cos(instance.currentRotY))
+          .normalize();
+        const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+        forward.crossVectors(right, up).normalize();
+
+        const rotMatrix = new THREE.Matrix4().makeBasis(right, up, forward);
+        instance.rig.root.quaternion.setFromRotationMatrix(rotMatrix);
+      }
 
       // Animate character limbs
       animateCharacterRig(instance.rig, delta, instance.isMoving, instance.isJumping);

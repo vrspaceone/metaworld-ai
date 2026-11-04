@@ -77,9 +77,9 @@ async function startServer() {
   chatHistory.push({
     id: 'sys-welcome',
     playerId: 'system',
-    nickname: 'MetaWorld System',
-    color: '#38bdf8',
-    text: '메타월드 자연(Nature) 월드에 오신 것을 환영합니다! 다른 플레이어와 자유롭게 대화해보세요.',
+    nickname: 'B612 System',
+    color: '#fbbf24',
+    text: '어린 왕자의 소행성 B612에 오신 것을 환영합니다! 장미와 일몰 의자, 세 개의 화산을 둘러보세요.',
     timestamp: Date.now(),
   });
 
@@ -89,13 +89,13 @@ async function startServer() {
       const nickname = (data?.nickname || 'Traveler').slice(0, 16);
       const color = data?.appearance?.shirtColor || data?.color || '#3b82f6';
 
-      // Spawn in a spacious open ring around the campfire (radius ~4.8 - 6.8 units)
+      // Spawn on Asteroid B612 spherical surface (radius 14.0)
+      const u = 0.05 + Math.random() * 0.15; // Near north pole
       const angle = Math.random() * Math.PI * 2;
-      const dist = 4.8 + Math.random() * 2.0;
       const initialPos = {
-        x: Math.sin(angle) * dist,
-        y: 0,
-        z: Math.cos(angle) * dist,
+        x: Math.sin(angle) * (14.0 * Math.sin(u)),
+        y: 14.0 * Math.cos(u),
+        z: Math.cos(angle) * (14.0 * Math.sin(u)),
       };
 
       const newPlayer: PlayerData = {
@@ -260,7 +260,7 @@ async function startServer() {
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -281,7 +281,15 @@ async function startServer() {
     });
   }
 
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  // CLI argument --port takes highest precedence (e.g. AI Studio dev server on port 3000)
+  let port = 3000;
+  const portArgIndex = process.argv.indexOf('--port');
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    port = parseInt(process.argv[portArgIndex + 1], 10);
+  } else if (isProduction && process.env.PORT) {
+    port = parseInt(process.env.PORT, 10);
+  }
+
   server.listen(port, '0.0.0.0', () => {
     console.log(`[MetaWorld] Server running on port ${port} (mode: ${isProduction ? 'production' : 'development'})`);
   });

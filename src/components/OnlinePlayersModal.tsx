@@ -1,6 +1,8 @@
 import React from 'react';
+import * as THREE from 'three';
 import { X, Users, MapPin } from 'lucide-react';
 import { PlayerData, Vector3D } from '../types/game.ts';
+import { ROSE_DIR, CHAIR_DIR, VOLCANO_1_DIR, VOLCANO_2_DIR, VOLCANO_3_DIR, PLANET_RADIUS } from '../game/world.ts';
 
 interface OnlinePlayersModalProps {
   isOpen: boolean;
@@ -41,14 +43,23 @@ export const OnlinePlayersModal: React.FC<OnlinePlayersModalProps> = ({
         <div className="max-h-72 overflow-y-auto space-y-2 custom-scrollbar pr-1">
           {players.map((p) => {
             const isMe = p.id === selfId;
-            const dist = Math.hypot(p.position.x - selfPos.x, p.position.z - selfPos.z);
-            let locationDesc = '자연 월드 탐험 중';
-            const distToCenter = Math.hypot(p.position.x, p.position.z);
-            const distToLake = Math.hypot(p.position.x - 18, p.position.z + 12);
+            const pVec = new THREE.Vector3(p.position.x, p.position.y, p.position.z);
+            const dist = pVec.distanceTo(new THREE.Vector3(selfPos.x, selfPos.y, selfPos.z));
+            let locationDesc = '소행성 B612 탐험 중';
 
-            if (distToCenter < 6) locationDesc = '중앙 모닥불 광장';
-            else if (distToLake < 9) locationDesc = '호수 부둣가 근처';
-            else if (p.position.y > 3) locationDesc = '북동쪽 높은 언덕';
+            if (pVec.distanceTo(ROSE_DIR.clone().multiplyScalar(PLANET_RADIUS)) < 3.8) {
+              locationDesc = '🌹 유리 돔 속 장미';
+            } else if (pVec.distanceTo(CHAIR_DIR.clone().multiplyScalar(PLANET_RADIUS)) < 3.8) {
+              locationDesc = '🪑 일몰 감상 의자';
+            } else if (pVec.distanceTo(VOLCANO_1_DIR.clone().multiplyScalar(PLANET_RADIUS)) < 3.8) {
+              locationDesc = '🌋 제1 대형 활화산';
+            } else if (pVec.distanceTo(VOLCANO_2_DIR.clone().multiplyScalar(PLANET_RADIUS)) < 3.8) {
+              locationDesc = '🌋 제2 작은 활화산';
+            } else if (pVec.distanceTo(VOLCANO_3_DIR.clone().multiplyScalar(PLANET_RADIUS)) < 3.8) {
+              locationDesc = '🧹 굴뚝 솔 사화산';
+            } else if (p.position.y > 13.0) {
+              locationDesc = '🪐 소행성 북극 정상';
+            }
 
             return (
               <div

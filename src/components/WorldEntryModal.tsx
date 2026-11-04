@@ -1,7 +1,12 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React, { useState } from 'react';
-import { Compass, Users, Sparkles, Move3d, Server, AlertCircle, CheckCircle2, Shirt, Wand2 } from 'lucide-react';
+import { Sparkles, Move3d, Server, AlertCircle, CheckCircle2, Shirt, Rocket } from 'lucide-react';
 import { CharacterAppearance } from '../types/game.ts';
-import { CHARACTER_PRESETS, CharacterPreset, DEFAULT_APPEARANCE } from '../game/character.ts';
+import { CHARACTER_PRESETS, CharacterPreset } from '../game/character.ts';
 import { CharacterPreviewCanvas } from './CharacterPreviewCanvas.tsx';
 import { CharacterCustomizerModal } from './CharacterCustomizerModal.tsx';
 
@@ -11,18 +16,23 @@ interface WorldEntryModalProps {
   onOpenServerConfig: () => void;
 }
 
+const DEFAULT_NICKNAMES = ['어린왕자', '별여행자', '사막여우', '붉은장미', '비행사', '우주비행사'];
+
 export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
   onJoin,
   isConnected,
   onOpenServerConfig,
 }) => {
-  const [nickname, setNickname] = useState(() => `탐험가_${Math.floor(Math.random() * 899 + 100)}`);
+  const [nickname, setNickname] = useState(() => {
+    const prefix = DEFAULT_NICKNAMES[Math.floor(Math.random() * DEFAULT_NICKNAMES.length)];
+    return `${prefix}_${Math.floor(Math.random() * 899 + 100)}`;
+  });
   const [appearance, setAppearance] = useState<CharacterAppearance>(CHARACTER_PRESETS[0].appearance);
   const [isCustomizerOpen, setIsCustomizerOpen] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanName = nickname.trim() || '탐험가';
+    const cleanName = nickname.trim() || '어린왕자';
     onJoin(cleanName, appearance.shirtColor, appearance);
   };
 
@@ -32,32 +42,33 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-3 sm:p-5 animate-in fade-in duration-200">
-        <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl p-5 sm:p-7 text-white overflow-hidden max-h-[92vh] overflow-y-auto">
-          {/* Subtle decorative background gradient */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-3 sm:p-5 animate-in fade-in duration-200">
+        <div className="relative w-full max-w-2xl bg-slate-950/95 border border-amber-500/30 rounded-3xl shadow-2xl p-5 sm:p-7 text-white overflow-hidden max-h-[92vh] overflow-y-auto">
+          {/* Subtle cosmic decorative background gradient */}
           <div
-            className="absolute -top-24 -right-24 w-64 h-64 rounded-full opacity-25 blur-3xl pointer-events-none transition-colors duration-500"
+            className="absolute -top-24 -right-24 w-72 h-72 rounded-full opacity-20 blur-3xl pointer-events-none transition-colors duration-500"
             style={{ backgroundColor: appearance.shirtColor }}
           />
+          <div className="absolute -bottom-24 -left-24 w-64 h-64 rounded-full bg-rose-500/10 blur-3xl pointer-events-none" />
 
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div
-                className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg transition-colors duration-300"
+                className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-colors duration-300 border border-white/10"
                 style={{ backgroundColor: appearance.shirtColor }}
               >
-                <Compass className="w-6 h-6 text-white" />
+                <span className="text-2xl">🪐</span>
               </div>
               <div>
                 <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-                  Meta World
-                  <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                    자연 3D 멀티플레이
+                  소행성 B612
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    어린 왕자의 별 · 3D 소행성
                   </span>
                 </h1>
-                <p className="text-xs text-slate-400">
-                  아바타를 선택하고 자연 가상 세계에 접속하세요
+                <p className="text-xs text-slate-400 mt-0.5">
+                  장미와 일몰, 세 개의 화산이 있는 작은 구형 소행성으로 여행을 떠나세요
                 </p>
               </div>
             </div>
@@ -65,7 +76,7 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
             <button
               type="button"
               onClick={onOpenServerConfig}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-colors flex items-center gap-1.5 text-xs font-medium"
+              className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-800 transition-colors flex items-center gap-1.5 text-xs font-medium"
               title="소켓 서버 설정"
             >
               <Server className="w-4 h-4 text-blue-400" />
@@ -89,7 +100,7 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
               )}
               <span>
                 {isConnected
-                  ? '실시간 멀티플레이 서버 연결 완료'
+                  ? '실시간 우주 정거장 서버 연결 완료'
                   : '소켓 서버 연결 중...'}
               </span>
             </div>
@@ -108,7 +119,7 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
             {/* Character Preview & Archetype Selection */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-center">
               {/* 3D Character Preview (5 cols) */}
-              <div className="sm:col-span-5 h-56 rounded-2xl bg-slate-950/70 border border-slate-800 shadow-inner flex flex-col items-center justify-center p-2 relative">
+              <div className="sm:col-span-5 h-56 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-inner flex flex-col items-center justify-center p-2 relative">
                 <CharacterPreviewCanvas appearance={appearance} className="w-full h-full" />
                 <button
                   type="button"
@@ -125,7 +136,7 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
                 {/* Nickname Input */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    플레이어 닉네임
+                    여행자 닉네임
                   </label>
                   <input
                     type="text"
@@ -134,7 +145,7 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
                     placeholder="닉네임을 입력하세요"
                     maxLength={14}
                     required
-                    className="w-full px-3.5 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-medium text-sm"
+                    className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all font-medium text-sm"
                   />
                 </div>
 
@@ -142,7 +153,7 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                      아바타 캐릭터 선택
+                      아바타 스타일 선택
                     </label>
                     <button
                       type="button"
@@ -167,8 +178,8 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
                           onClick={() => handleSelectPreset(preset)}
                           className={`p-2 rounded-xl border text-left transition-all flex items-center gap-2 ${
                             isSelected
-                              ? 'bg-blue-950/60 border-blue-400 text-white ring-1 ring-blue-400 shadow'
-                              : 'bg-slate-800/60 hover:bg-slate-800 border-slate-700/60 text-slate-300'
+                              ? 'bg-amber-950/50 border-amber-400 text-white ring-1 ring-amber-400 shadow'
+                              : 'bg-slate-900/60 hover:bg-slate-800 border-slate-800 text-slate-300'
                           }`}
                         >
                           <span className="text-lg">{preset.icon}</span>
@@ -181,16 +192,19 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
               </div>
             </div>
 
-            {/* Controls Quick Guide */}
-            <div className="p-3 bg-slate-800/50 rounded-xl border border-slate-700/60 text-xs text-slate-300 space-y-1">
-              <div className="flex items-center gap-2 font-medium text-slate-200">
-                <Move3d className="w-4 h-4 text-emerald-400" />
-                <span>조작 가이드</span>
+            {/* Controls & Asteroid Guide */}
+            <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-1">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-medium text-slate-200">
+                  <Move3d className="w-4 h-4 text-amber-400" />
+                  <span>소행성 탐험 조작 안내</span>
+                </div>
+                <span className="text-[10px] text-amber-300/80 font-mono">360° 구면 중심 중력</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px] text-slate-400 pt-1">
-                <div><strong className="text-slate-200 font-mono">W, A, S, D</strong> 이동</div>
-                <div><strong className="text-slate-200 font-mono">Space</strong> 점프</div>
-                <div><strong className="text-slate-200">마우스 드래그</strong> 시점</div>
+                <div><strong className="text-slate-200 font-mono">W, A, S, D</strong> 구면 이동</div>
+                <div><strong className="text-slate-200 font-mono">Space</strong> 중력 점프</div>
+                <div><strong className="text-slate-200">마우스 드래그</strong> 우주 시점</div>
                 <div><strong className="text-slate-200 font-mono">1~5 키</strong> 감정표현</div>
               </div>
             </div>
@@ -198,11 +212,11 @@ export const WorldEntryModal: React.FC<WorldEntryModalProps> = ({
             {/* Submit Button */}
             <button
               type="submit"
-              className="w-full py-3 px-6 rounded-xl font-bold text-sm tracking-wide text-white transition-all shadow-lg hover:shadow-xl active:scale-[0.99] flex items-center justify-center gap-2 hover:brightness-110"
+              className="w-full py-3.5 px-6 rounded-xl font-bold text-sm tracking-wide text-white transition-all shadow-lg hover:shadow-xl active:scale-[0.99] flex items-center justify-center gap-2 hover:brightness-110 border border-white/20"
               style={{ backgroundColor: appearance.shirtColor }}
             >
-              <Users className="w-4 h-4" />
-              자연 월드 입장하기
+              <Rocket className="w-4 h-4" />
+              <span>소행성 B612 착륙하기</span>
             </button>
           </form>
         </div>
